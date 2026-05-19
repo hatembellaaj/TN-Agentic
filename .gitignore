@@ -1,0 +1,43 @@
+# Environnement
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Docker volumes (dev local)
+volumes/
+postgres-data/
+n8n-data/
+
+# Sortie FilePublisher (généré, ne pas versionner)
+output/articles/*
+!output/articles/.gitkeep
+
+# Logs locaux
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

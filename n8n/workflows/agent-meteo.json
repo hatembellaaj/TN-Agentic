@@ -1,0 +1,149 @@
+{
+  "name": "Agent Météo - Quotidien 06h00",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-6h",
+      "name": "Cron 06h00 (Africa/Tunis)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://editorial-core:8000/api/agents/weather/run",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"trigger_scrape\": true,\n  \"async_mode\": false\n}"
+      },
+      "id": "run-weather-agent",
+      "name": "Run agent météo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-success",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "success",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-success",
+      "name": "Succès ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "content": "✅ Exécution terminée avec succès\nArticles générés : {{ $json.articles.length }}\nDurée : {{ $json.duree_secondes }}s\nexecution_id : {{ $json.execution_id }}",
+        "height": 120,
+        "width": 320,
+        "color": 4
+      },
+      "id": "sticky-ok",
+      "name": "Succès note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "content": "⚠️ Erreur dans le pipeline.\nVérifier /dashboard/executions et logs Docker.\nUne notification Telegram aurait déjà été envoyée par editorial-core si l'étape Telegram a tourné.",
+        "height": 160,
+        "width": 320,
+        "color": 5
+      },
+      "id": "sticky-error",
+      "name": "Erreur note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [960, 420]
+    }
+  ],
+  "connections": {
+    "Cron 06h00 (Africa/Tunis)": {
+      "main": [
+        [
+          {
+            "node": "Run agent météo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run agent météo": {
+      "main": [
+        [
+          {
+            "node": "Succès ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Tunis",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "tags": [
+    {
+      "name": "TN-Agentic",
+      "createdAt": "2026-05-18T00:00:00.000Z"
+    },
+    {
+      "name": "Sprint 1",
+      "createdAt": "2026-05-18T00:00:00.000Z"
+    }
+  ],
+  "pinData": {},
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "tn-agentic-poc"
+  }
+}

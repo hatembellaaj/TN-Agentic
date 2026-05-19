@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}TN-Agentic Dashboard{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root {
+      --primary: #2c5282;
+      --primary-light: #f0f4f8;
+      --success: #2f855a;
+      --warning: #d69e2e;
+      --error: #c53030;
+      --gray: #718096;
+      --bg: #f7fafc;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: #1a202c;
+      line-height: 1.5;
+    }
+    header {
+      background: var(--primary);
+      color: white;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    header h1 { font-size: 1.2rem; margin: 0; font-weight: 600; }
+    header nav a {
+      color: white;
+      text-decoration: none;
+      margin-left: 1.5rem;
+      opacity: 0.85;
+      font-size: 0.95rem;
+    }
+    header nav a:hover { opacity: 1; text-decoration: underline; }
+    main { max-width: 1400px; margin: 2rem auto; padding: 0 2rem; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: white;
+      padding: 1.2rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .stat-card .label { font-size: 0.85rem; color: var(--gray); text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-card .value { font-size: 1.8rem; font-weight: 600; color: var(--primary); margin-top: 0.3rem; }
+    .filters {
+      background: white;
+      padding: 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      margin-bottom: 1.5rem;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: end;
+    }
+    .filters label { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--gray); }
+    .filters select, .filters input {
+      padding: 0.4rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 0.9rem;
+      margin-top: 0.2rem;
+    }
+    .filters button {
+      padding: 0.5rem 1rem;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .filters button:hover { background: #1a365d; }
+    table {
+      width: 100%;
+      background: white;
+      border-collapse: collapse;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    th {
+      background: var(--primary-light);
+      font-weight: 600;
+      color: var(--primary);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+    }
+    tr:hover { background: #fafbfc; }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.6rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .badge-success { background: #c6f6d5; color: var(--success); }
+    .badge-warning { background: #faf089; color: var(--warning); }
+    .badge-error { background: #fed7d7; color: var(--error); }
+    .badge-info { background: #bee3f8; color: var(--primary); }
+    .badge-gray { background: #e2e8f0; color: var(--gray); }
+    a { color: var(--primary); }
+    .empty-state {
+      padding: 3rem;
+      text-align: center;
+      color: var(--gray);
+      background: white;
+      border-radius: 8px;
+      border: 1px dashed var(--border);
+    }
+    .breadcrumb { color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem; }
+    .breadcrumb a { text-decoration: none; }
+    .article-preview {
+      background: white;
+      padding: 2rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      margin-top: 1rem;
+    }
+    .article-preview table { border: 1px solid #ccc; }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 0.5rem 1rem;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+    .meta-grid dt { font-weight: 600; color: var(--gray); }
+    .meta-grid dd { margin: 0; word-break: break-word; }
+    .copy-btn {
+      padding: 0.4rem 0.8rem;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    pre {
+      background: #1a202c;
+      color: #cbd5e0;
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 0.8rem;
+    }
+    .timeline { list-style: none; padding-left: 1rem; border-left: 2px solid var(--border); }
+    .timeline li { padding: 0.4rem 0 0.4rem 1rem; position: relative; }
+    .timeline li::before {
+      content: ''; position: absolute; left: -7px; top: 0.8rem;
+      width: 10px; height: 10px; background: var(--primary); border-radius: 50%;
+    }
+    .timeline li.error::before { background: var(--error); }
+    .timeline li.success::before { background: var(--success); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🤖 TN-Agentic — Dashboard</h1>
+    <nav>
+      <a href="/dashboard/">Articles</a>
+      <a href="/dashboard/executions">Exécutions</a>
+      <a href="/api/docs">API (Swagger)</a>
+      <a href="/scraper/docs">Scraper API</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

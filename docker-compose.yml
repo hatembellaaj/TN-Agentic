@@ -1,0 +1,140 @@
+# ============================================================
+# TN-Agentic — Stack Docker Compose
+# Sprint 1 : Agent météo bout en bout
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # PostgreSQL : base de données métier
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: tn-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Africa/Tunis
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tn-net
+
+  # ----------------------------------------------------------
+  # scraper-weather : collecte OpenWeatherMap (24 gouvernorats)
+  # ----------------------------------------------------------
+  scraper-weather:
+    build:
+      context: ./scraper-weather
+      dockerfile: Dockerfile
+    container_name: tn-scraper-weather
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tn-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ----------------------------------------------------------
+  # editorial-core : Claude + Publisher + Telegram + Dashboard
+  # ----------------------------------------------------------
+  editorial-core:
+    build:
+      context: ./editorial-core
+      dockerfile: Dockerfile
+    container_name: tn-editorial-core
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./output/articles:/var/www/articles
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tn-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ----------------------------------------------------------
+  # n8n : orchestrateur de workflows
+  # ----------------------------------------------------------
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: tn-n8n
+    restart: unless-stopped
+    environment:
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL}
+      WEBHOOK_URL: ${PUBLIC_BASE_URL}/n8n/
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      N8N_EDITOR_BASE_URL: ${PUBLIC_BASE_URL}/n8n/
+      N8N_PATH: /n8n/
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    networks:
+      - tn-net
+
+  # ----------------------------------------------------------
+  # nginx : reverse proxy + serveur des articles statiques
+  # ----------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: tn-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      # - "443:443"   # Activer avec Certbot en production
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./output/articles:/var/www/articles:ro
+    depends_on:
+      - editorial-core
+      - scraper-weather
+      - n8n
+    networks:
+      - tn-net
+
+  # ----------------------------------------------------------
+  # adminer : UI debug PostgreSQL (derrière basic auth via nginx)
+  # ----------------------------------------------------------
+  adminer:
+    image: adminer:latest
+    container_name: tn-adminer
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      - postgres
+    networks:
+      - tn-net
+
+volumes:
+  postgres-data:
+  n8n-data:
+
+networks:
+  tn-net:
+    driver: bridge

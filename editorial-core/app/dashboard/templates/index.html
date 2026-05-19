@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Articles générés — TN-Agentic{% endblock %}
+
+{% block content %}
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Articles générés (total)</div>
+      <div class="value">{{ total_articles }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Coût Claude cumulé</div>
+      <div class="value">${{ "%.4f"|format(cout_total_usd) }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Sortie actuelle</div>
+      <div class="value" style="font-size: 1.2rem;">FilePublisher</div>
+    </div>
+  </div>
+
+  <form class="filters" method="get" action="/dashboard/">
+    <label>Thème
+      <select name="theme">
+        <option value="">Tous</option>
+        <option value="meteo" {% if filters.theme == "meteo" %}selected{% endif %}>Météo</option>
+        <option value="taux_change" {% if filters.theme == "taux_change" %}selected{% endif %}>Taux de change</option>
+        <option value="billets_monnaies" {% if filters.theme == "billets_monnaies" %}selected{% endif %}>Billets et monnaies</option>
+        <option value="recap_economique" {% if filters.theme == "recap_economique" %}selected{% endif %}>Récap économique</option>
+      </select>
+    </label>
+    <label>Langue
+      <select name="langue">
+        <option value="">Toutes</option>
+        <option value="fr" {% if filters.langue == "fr" %}selected{% endif %}>Français</option>
+        <option value="en" {% if filters.langue == "en" %}selected{% endif %}>English</option>
+      </select>
+    </label>
+    <label>Statut
+      <select name="statut">
+        <option value="">Tous</option>
+        <option value="draft" {% if filters.statut == "draft" %}selected{% endif %}>Brouillon</option>
+        <option value="review_required" {% if filters.statut == "review_required" %}selected{% endif %}>Révision requise</option>
+        <option value="validated" {% if filters.statut == "validated" %}selected{% endif %}>Validé</option>
+      </select>
+    </label>
+    <label>Du
+      <input type="date" name="date_from" value="{{ filters.date_from or '' }}">
+    </label>
+    <label>Au
+      <input type="date" name="date_to" value="{{ filters.date_to or '' }}">
+    </label>
+    <button type="submit">Filtrer</button>
+  </form>
+
+  {% if articles %}
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Thème</th>
+          <th>Langue</th>
+          <th>Titre</th>
+          <th>Statut</th>
+          <th>Anti-halluc.</th>
+          <th>Modèle</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in articles %}
+          <tr>
+            <td>{{ a.date_publication }}</td>
+            <td><span class="badge badge-info">{{ a.theme }}</span></td>
+            <td>{{ a.langue|upper }}</td>
+            <td style="max-width: 400px;">{{ a.titre_editorial }}</td>
+            <td>
+              {% if a.statut == 'draft' %}
+                <span class="badge badge-success">brouillon</span>
+              {% elif a.statut == 'review_required' %}
+                <span class="badge badge-warning">à réviser</span>
+              {% elif a.statut == 'validated' %}
+                <span class="badge badge-info">validé</span>
+              {% else %}
+                <span class="badge badge-gray">{{ a.statut }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if a.hallucination_check == 'passed' %}
+                <span class="badge badge-success">passé</span>
+              {% else %}
+                <span class="badge badge-error">suspecté</span>
+              {% endif %}
+            </td>
+            <td style="font-size: 0.8rem;">{{ a.modele_claude_utilise }}</td>
+            <td><a href="/dashboard/articles/{{ a.id }}">Détail →</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="empty-state">
+      <p>Aucun article ne correspond aux filtres. Lance un agent pour générer le premier :</p>
+      <pre style="text-align: left; display: inline-block;">curl -X POST http://localhost/api/agents/weather/run</pre>
+    </div>
+  {% endif %}
+{% endblock %}

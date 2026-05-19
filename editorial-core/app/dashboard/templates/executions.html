@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Exécutions — TN-Agentic{% endblock %}
+
+{% block content %}
+  <h2>Exécutions récentes</h2>
+  <p style="color: var(--gray);">Cliquer sur une exécution pour voir la trace pas-à-pas (collecte → Claude → publication → Telegram).</p>
+
+  {% if executions %}
+    <table>
+      <thead>
+        <tr>
+          <th>Démarrée</th>
+          <th>Terminée</th>
+          <th>Agent</th>
+          <th>Étapes</th>
+          <th>Statut</th>
+          <th>execution_id</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ex in executions %}
+          <tr>
+            <td>{{ ex.started_at.strftime('%Y-%m-%d %H:%M:%S') if ex.started_at else '—' }}</td>
+            <td>{{ ex.finished_at.strftime('%H:%M:%S') if ex.finished_at else '—' }}</td>
+            <td>
+              {% set unique_agents = ex.agents | unique | list %}
+              {% for a in unique_agents %}
+                <span class="badge badge-info">{{ a }}</span>
+              {% endfor %}
+            </td>
+            <td>{{ ex.steps }}</td>
+            <td>
+              {% if ex.has_error %}
+                <span class="badge badge-error">Erreur</span>
+              {% else %}
+                <span class="badge badge-success">OK</span>
+              {% endif %}
+            </td>
+            <td><code style="font-size: 0.75rem;">{{ ex.execution_id }}</code></td>
+            <td><a href="/dashboard/executions/{{ ex.execution_id }}">Détail →</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="empty-state">Aucune exécution enregistrée pour le moment.</div>
+  {% endif %}
+{% endblock %}

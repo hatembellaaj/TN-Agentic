@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}{{ article.titre_editorial }} — TN-Agentic{% endblock %}
+
+{% block content %}
+  <div class="breadcrumb">
+    <a href="/dashboard/">Articles</a> &rsaquo; Article #{{ article.id }}
+  </div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <h2 style="margin: 0;">{{ article.titre_editorial }}</h2>
+    <div>
+      {% if article.statut == 'draft' %}
+        <span class="badge badge-success">Brouillon</span>
+      {% elif article.statut == 'review_required' %}
+        <span class="badge badge-warning">Révision requise</span>
+      {% endif %}
+      <span class="badge badge-info">{{ article.langue|upper }}</span>
+    </div>
+  </div>
+
+  <div class="stats" style="margin-top: 1rem;">
+    <div class="stat-card">
+      <div class="label">Modèle Claude</div>
+      <div class="value" style="font-size: 1rem;">{{ article.modele_claude_utilise }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Coût (USD)</div>
+      <div class="value">${{ "%.6f"|format(cost_usd) }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Tokens (in / out / cache)</div>
+      <div class="value" style="font-size: 1rem;">{{ tokens_input }} / {{ tokens_output }} / {{ tokens_cache_read }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Vérif anti-hallucination</div>
+      <div class="value" style="font-size: 1rem;">
+        {% if article.hallucination_check == 'passed' %}✅ Passé{% else %}⚠️ {{ article.hallucination_check }}{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <h3>Métadonnées Yoast</h3>
+  <dl class="meta-grid">
+    <dt>Titre SEO</dt><dd>{{ article.titre_seo }}</dd>
+    <dt>Méta-description</dt><dd>{{ article.meta_description }}</dd>
+    <dt>Focus keyword</dt><dd>{{ article.focus_keyword }}</dd>
+    <dt>Mots-clés secondaires</dt><dd>{{ article.mots_cles | join(', ') if article.mots_cles else '—' }}</dd>
+    <dt>Slug</dt><dd><code>{{ article.slug }}</code></dd>
+    <dt>Catégorie suggérée</dt><dd>{{ article.categorie_wordpress }}</dd>
+    <dt>Fichier publié</dt><dd>{{ article.file_path or '—' }}</dd>
+    <dt>Post WordPress</dt><dd>{{ article.wordpress_post_id or 'Non publié (FilePublisher actif)' }}</dd>
+    <dt>execution_id</dt>
+    <dd>
+      <code>{{ article.execution_id }}</code>
+      <a href="/dashboard/executions/{{ article.execution_id }}" style="margin-left: 0.5rem;">Voir l'exécution →</a>
+    </dd>
+  </dl>
+
+  {% if article.hallucination_details and article.hallucination_details.orphan_numbers %}
+    <h3 style="color: var(--error);">⚠️ Chiffres orphelins détectés</h3>
+    <p>Ces valeurs apparaissent dans l'article mais ne correspondent à aucune donnée source :</p>
+    <pre>{{ article.hallucination_details.orphan_numbers | join(', ') }}</pre>
+  {% endif %}
+
+  <h3>Aperçu de l'article</h3>
+  <button class="copy-btn" onclick="copyHtml()">📋 Copier le HTML</button>
+  <a class="copy-btn" style="background: var(--success); text-decoration: none; margin-left: 0.5rem;" href="data:text/html;charset=utf-8,{{ article.contenu_html|urlencode }}" download="{{ article.slug }}.html">⬇ Télécharger</a>
+
+  <div class="article-preview" id="articlePreview">
+    {{ article.contenu_html | safe }}
+  </div>
+
+  <script>
+    function copyHtml() {
+      const el = document.getElementById('articlePreview');
+      navigator.clipboard.writeText(el.innerHTML).then(() => {
+        alert('HTML copié dans le presse-papier — collez-le dans WordPress.');
+      });
+    }
+  </script>
+{% endblock %}

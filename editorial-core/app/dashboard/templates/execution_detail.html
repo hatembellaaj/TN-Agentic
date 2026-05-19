@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Exécution {{ execution_id[:8] }}… — TN-Agentic{% endblock %}
+
+{% block content %}
+  <div class="breadcrumb">
+    <a href="/dashboard/executions">Exécutions</a> &rsaquo; {{ execution_id }}
+  </div>
+
+  <h2>Exécution <code>{{ execution_id }}</code></h2>
+
+  <h3>📋 Étapes du pipeline</h3>
+  {% if steps %}
+    <ul class="timeline">
+      {% for step in steps %}
+        <li class="{{ step.status }}">
+          <strong>{{ step.timestamp.strftime('%H:%M:%S') }}</strong> —
+          <code>{{ step.agent_name }}</code>:
+          <code>{{ step.agent_step }}</code>
+          {% if step.status == 'error' %}
+            <span class="badge badge-error">{{ step.status }}</span>
+          {% elif step.status == 'success' %}
+            <span class="badge badge-success">{{ step.status }}</span>
+          {% else %}
+            <span class="badge badge-warning">{{ step.status }}</span>
+          {% endif %}
+          {% if step.duree_ms %}<span style="color: var(--gray);">({{ step.duree_ms }}ms)</span>{% endif %}
+          {% if step.message %}<div style="margin-top: 0.2rem; color: var(--gray);">{{ step.message }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>Aucune étape enregistrée.</p>
+  {% endif %}
+
+  <h3>📰 Articles générés</h3>
+  {% if articles %}
+    <table>
+      <thead><tr><th>Langue</th><th>Titre</th><th>Statut</th><th>Halluc.</th><th></th></tr></thead>
+      <tbody>
+        {% for a in articles %}
+          <tr>
+            <td>{{ a.langue|upper }}</td>
+            <td>{{ a.titre_editorial }}</td>
+            <td>
+              {% if a.statut == 'draft' %}<span class="badge badge-success">brouillon</span>
+              {% elif a.statut == 'review_required' %}<span class="badge badge-warning">à réviser</span>
+              {% else %}<span class="badge badge-gray">{{ a.statut }}</span>{% endif %}
+            </td>
+            <td>{{ a.hallucination_check }}</td>
+            <td><a href="/dashboard/articles/{{ a.id }}">Voir →</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Aucun article généré pour cette exécution.</p>
+  {% endif %}
+
+  <h3>🤖 Appels Claude</h3>
+  {% if claude_calls %}
+    <table>
+      <thead><tr><th>Thème</th><th>Modèle</th><th>Tokens in/out</th><th>Cache read</th><th>Coût USD</th><th>Durée</th><th>Statut</th></tr></thead>
+      <tbody>
+        {% for c in claude_calls %}
+          <tr>
+            <td>{{ c.theme }}</td>
+            <td>{{ c.modele_utilise }}</td>
+            <td>{{ c.tokens_input }} / {{ c.tokens_output }}</td>
+            <td>{{ c.tokens_cache_read or 0 }}</td>
+            <td>${{ "%.6f"|format(c.cout_estime_usd or 0) }}</td>
+            <td>{{ c.duree_ms }}ms</td>
+            <td>
+              {% if c.status == 'success' %}<span class="badge badge-success">{{ c.status }}</span>
+              {% else %}<span class="badge badge-error">{{ c.status }}</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Aucun appel Claude pour cette exécution.</p>
+  {% endif %}
+
+  <h3>📨 Notifications Telegram</h3>
+  {% if notifications %}
+    <table>
+      <thead><tr><th>Destinataire</th><th>Canal</th><th>Statut</th><th>Envoyé à</th></tr></thead>
+      <tbody>
+        {% for n in notifications %}
+          <tr>
+            <td>{{ n.destinataire }}</td>
+            <td>{{ n.canal }}</td>
+            <td>
+              {% if n.statut == 'success' %}<span class="badge badge-success">{{ n.statut }}</span>
+              {% else %}<span class="badge badge-error">{{ n.statut }}</span>{% endif %}
+            </td>
+            <td>{{ n.timestamp_envoi.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Aucune notification envoyée.</p>
+  {% endif %}
+{% endblock %}
