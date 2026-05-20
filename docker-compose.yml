@@ -46,6 +46,11 @@ services:
         condition: service_healthy
     networks:
       - tn-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # ----------------------------------------------------------
   # scraper-bct : collecte BCT (devises + indicateurs macro)
@@ -66,11 +71,6 @@ services:
       - tn-net
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
