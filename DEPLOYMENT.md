@@ -49,23 +49,68 @@ docker compose exec editorial-core python -m app.seed
 
 ## 5. Vérification
 
+Toutes les URLs passent par le port `HOST_PORT` (défaut **18090**). Remplacer `<host>` par `localhost` en local, ou par l'IP/domaine du serveur en production.
+
 | URL | Attendu |
 | --- | --- |
-| http://localhost/dashboard/ | Dashboard, table vide au début |
-| http://localhost/api/docs | Swagger editorial-core |
-| http://localhost/scraper/docs | Swagger scraper-weather |
-| http://localhost/n8n/ | UI n8n (login admin / mdp .env) |
-| http://localhost/adminer/ | Adminer (server: postgres) |
+| http://&lt;host&gt;:18090/dashboard/ | Dashboard, table vide au début |
+| http://&lt;host&gt;:18090/api/docs | Swagger editorial-core |
+| http://&lt;host&gt;:18090/scraper/docs | Swagger scraper-weather |
+| http://&lt;host&gt;:18090/n8n/ | UI n8n (login admin / mdp .env) |
+| http://&lt;host&gt;:18090/adminer/ | Adminer (server: postgres) |
+
+### Si 18090 est déjà pris
+
+Éditer `.env` :
+```
+HOST_PORT=18091   # ou tout autre port libre
+PUBLIC_BASE_URL=http://localhost:18091
+```
+Puis `docker compose up -d` (pas besoin de rebuild).
+
+Vérifier les ports déjà occupés sur le serveur :
+```bash
+docker ps --format "table {{.Names}}\t{{.Ports}}" | grep -oP '0\.0\.0\.0:\K[0-9]+' | sort -un
+# ou
+ss -tlnp | grep LISTEN
+```
+
+### Intégrer avec un reverse proxy externe (jwilder/nginx-proxy)
+
+Si tu utilises déjà `jwilder/nginx-proxy` + `letsencrypt-nginx-proxy-companion` sur le serveur, tu peux **ne pas exposer de port** et router via VIRTUAL_HOST :
+
+```yaml
+# dans docker-compose.yml, service nginx :
+nginx:
+  # ports: []                                  # commenter la mapping
+  expose:
+    - "80"
+  environment:
+    VIRTUAL_HOST: agent.tunisienumerique.com
+    LETSENCRYPT_HOST: agent.tunisienumerique.com
+    LETSENCRYPT_EMAIL: tech@tunisienumerique.com
+  networks:
+    - tn-net
+    - nginx-proxy   # rejoindre le réseau de jwilder/nginx-proxy
+
+networks:
+  tn-net:
+  nginx-proxy:
+    external: true
+    name: <nom-du-réseau-de-nginx-proxy>   # docker network ls pour le trouver
+```
+Puis adapter `PUBLIC_BASE_URL=https://agent.tunisienumerique.com` dans `.env`.
 
 ## 6. Premier run manuel
 
 Sans attendre 6h00, déclencher une exécution :
 
 ```bash
-curl -X POST http://localhost/api/agents/weather/run -H 'Content-Type: application/json' -d '{}'
+curl -X POST http://localhost:18090/api/agents/weather/run \
+  -H 'Content-Type: application/json' -d '{}'
 ```
 
-Ou via Swagger UI : http://localhost/api/docs → `POST /api/agents/weather/run` → "Try it out".
+Ou via Swagger UI : http://&lt;host&gt;:18090/api/docs → `POST /api/agents/weather/run` → "Try it out".
 
 Le pipeline complet (collecte 24 gouvernorats → Claude → fichiers HTML → Telegram) prend ~30 à 90 secondes.
 

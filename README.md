@@ -38,13 +38,15 @@ docker compose up -d
 docker compose exec editorial-core alembic upgrade head
 docker compose exec editorial-core python -m app.seed
 
-# 4. Vérifier
-# Dashboard : http://localhost/dashboard
-# Swagger editorial-core : http://localhost/api/docs
-# Swagger scraper-weather : http://localhost/scraper/docs
-# n8n : http://localhost/n8n
-# Adminer : http://localhost/adminer
+# 4. Vérifier (HOST_PORT par défaut = 18090, configurable dans .env)
+# Dashboard               : http://<host>:18090/dashboard/
+# Swagger editorial-core  : http://<host>:18090/api/docs
+# Swagger scraper-weather : http://<host>:18090/scraper/docs
+# n8n                     : http://<host>:18090/n8n/
+# Adminer                 : http://<host>:18090/adminer/
 ```
+
+**Note sur les ports.** Seul nginx est exposé vers l'extérieur (port hôte `HOST_PORT`, défaut 18090). Tous les autres services (postgres, scraper-weather, editorial-core, n8n, adminer) restent **internes** au réseau Docker `tn-net` et n'entrent en conflit avec aucune autre stack du serveur.
 
 ## Déclencher une exécution manuelle
 

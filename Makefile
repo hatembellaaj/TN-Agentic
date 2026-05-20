@@ -52,7 +52,10 @@ seed: ## Insère les 24 gouvernorats
 # Exécution
 # ----------------------------------------------------------
 run-weather: ## Déclenche l'agent météo manuellement (synchrone)
-	curl -s -X POST http://localhost/api/agents/weather/run \
+	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
+	PORT=$${PORT:-18090}; \
+	echo "→ POST http://localhost:$$PORT/api/agents/weather/run" ; \
+	curl -s -X POST http://localhost:$$PORT/api/agents/weather/run \
 	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
 
 # ----------------------------------------------------------

@@ -38,6 +38,9 @@ services:
     container_name: tn-scraper-weather
     restart: unless-stopped
     env_file: .env
+    environment:
+      # DATABASE_URL construite automatiquement à partir des POSTGRES_* du .env
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,6 +62,8 @@ services:
     container_name: tn-editorial-core
     restart: unless-stopped
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     volumes:
       - ./output/articles:/var/www/articles
     depends_on:
@@ -104,8 +109,10 @@ services:
     container_name: tn-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      # - "443:443"   # Activer avec Certbot en production
+      # Port hôte configurable via HOST_PORT dans .env (défaut 18090).
+      # Tous les autres services restent INTERNES au réseau tn-net, donc aucun
+      # conflit possible avec d'autres stacks Docker sur le serveur.
+      - "${HOST_PORT:-18090}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
