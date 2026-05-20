@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.bct_client import BctClient
 from app.config import settings
 from app.models import BctMacroIndicator, ExchangeRate, ExecutionLog
-from app.parser import parse_bct_index
+from app.parser import parse_bct_index, parse_indicators_page
 
 logger = logging.getLogger(__name__)
 
@@ -160,4 +160,116 @@ def collect_bct(session: Session, execution_id: uuid.UUID | None = None) -> dict
         "fiabilite_globale": fiabilite,
         "duree_ms": duree_ms,
         "status": "success" if devises_ok > 0 else "error",
+    }
+
+
+# ============================================================
+# Collecte indicateurs.jsp (Sprint 3)
+# ============================================================
+
+def collect_bct_indicators_detail(
+    session: Session, execution_id: uuid.UUID | None = None
+) -> dict[str, Any]:
+    """
+    Collecte des 11 sections détaillées depuis indicateurs.jsp.
+
+    Insère dans bct_macro_indicators avec des types distincts d'index.jsp
+    (suffixe _detail pour les chevauchements, sinon types neufs).
+    """
+    if execution_id is None:
+        execution_id = uuid.uuid4()
+
+    started = time.perf_counter()
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    today = dt.date.today()
+
+    client = BctClient()
+    try:
+        html = client.fetch_indicators_page()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Echec fetch indicateurs.jsp")
+        session.add(
+            ExecutionLog(
+                execution_id=execution_id,
+                agent_name="scraper-bct",
+                agent_step="fetch_indicators",
+                status="error",
+                message=str(exc),
+                duree_ms=int((time.perf_counter() - started) * 1000),
+            )
+        )
+        session.commit()
+        return {"execution_id": str(execution_id), "status": "error", "step": "fetch_indicators", "message": str(exc)}
+
+    rows = parse_indicators_page(html)
+
+    inserted = 0
+    skipped = 0
+    for row in rows:
+        if row["valeur_principale"] is None:
+            skipped += 1
+            continue
+        try:
+            session.add(
+                BctMacroIndicator(
+                    indicateur_type=row["type"],
+                    valeur=row["valeur_principale"],
+                    unite=row["unite"],
+                    date_cotation=row["date_cotation"] or today,
+                    source_url=settings.BCT_INDICATORS_URL,
+                    fiabilite="haute",
+                    raw_data_json={
+                        "section_id": row["section_id"],
+                        "label": row["label"],
+                        "row_label": row["row_label"],
+                        "valeurs_brutes": row["valeurs_brutes"],
+                        "raw_snippet": row["raw_snippet"],
+                    },
+                    timestamp_collecte=now_utc,
+                )
+            )
+            inserted += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("Echec insert section %s", row.get("type"))
+
+    session.commit()
+
+    duree_ms = int((time.perf_counter() - started) * 1000)
+    session.add(
+        ExecutionLog(
+            execution_id=execution_id,
+            agent_name="scraper-bct",
+            agent_step="collect_indicators",
+            status="success" if inserted > 0 else "error",
+            message=f"{inserted} sections insérées, {skipped} ignorées (vides)",
+            duree_ms=duree_ms,
+            payload_json={"inserted": inserted, "skipped": skipped, "rows_parsed": len(rows)},
+        )
+    )
+    session.commit()
+
+    return {
+        "execution_id": str(execution_id),
+        "sections_inserees": inserted,
+        "sections_ignorees": skipped,
+        "sections_total": len(rows),
+        "duree_ms": duree_ms,
+        "status": "success" if inserted > 0 else "error",
+    }
+
+
+def collect_all_bct(session: Session, execution_id: uuid.UUID | None = None) -> dict[str, Any]:
+    """
+    Pipeline complet : index.jsp + indicateurs.jsp.
+    Partage le même execution_id pour traçabilité bout en bout.
+    """
+    if execution_id is None:
+        execution_id = uuid.uuid4()
+    r1 = collect_bct(session, execution_id=execution_id)
+    r2 = collect_bct_indicators_detail(session, execution_id=execution_id)
+    return {
+        "execution_id": str(execution_id),
+        "status": "success" if r1.get("status") == "success" and r2.get("status") == "success" else "partial",
+        "index_jsp": r1,
+        "indicateurs_jsp": r2,
     }

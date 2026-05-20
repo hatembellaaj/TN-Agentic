@@ -267,7 +267,7 @@ def parse_indicators(html: str) -> list[dict[str, Any]]:
 # ============================================================
 
 def parse_bct_index(html: str) -> dict[str, Any]:
-    """Parse en une fois devises + indicateurs."""
+    """Parse en une fois devises + indicateurs depuis index.jsp."""
     devises, date_cotation = parse_devises(html)
     indicators = parse_indicators(html)
     return {
@@ -275,3 +275,140 @@ def parse_bct_index(html: str) -> dict[str, Any]:
         "devises": devises,
         "indicators": indicators,
     }
+
+
+# ============================================================
+# PARSEUR indicateurs.jsp — 11 sections (Sprint 3)
+# ============================================================
+
+# Mapping numéro de section romain → (entier, indicateur_type, unité)
+# Les types choisis sont distincts de ceux d'index.jsp pour éviter les doublons
+# quand les deux sources sont collectées ensemble. Les chevauchements (I=compte_tresor,
+# III=billets_circulation, IX=avoirs_nets) sont stockés avec suffixe "_detail".
+_SECTION_MAPPING: dict[int, dict[str, str]] = {
+    1:  {"type": "compte_tresor_detail",       "unite": "MDT",    "label": "Solde du compte courant du Trésor"},
+    2:  {"type": "solde_banques",              "unite": "MDT",    "label": "Solde du compte courant ordinaire des banques"},
+    3:  {"type": "billets_circulation_detail", "unite": "MDT",    "label": "Billets et monnaies en circulation"},
+    4:  {"type": "marche_monetaire",           "unite": "MDT",    "label": "Marché monétaire"},
+    5:  {"type": "bons_tresor",                "unite": "MDT",    "label": "Bons du Trésor"},
+    6:  {"type": "recettes_touristiques",      "unite": "MDT",    "label": "Recettes touristiques cumulées"},
+    7:  {"type": "revenus_travail_diaspora",   "unite": "MDT",    "label": "Revenus du travail (diaspora) cumulés"},
+    8:  {"type": "service_dette_exterieure",   "unite": "MDT",    "label": "Service de la dette extérieure cumulés"},
+    9:  {"type": "avoirs_nets_devises_detail", "unite": "MDT",    "label": "Avoirs nets en devises BCT"},
+    10: {"type": "taux_change_interbancaires", "unite": "TND",    "label": "Taux de change interbancaires"},
+    11: {"type": "indice_tunindex",            "unite": "points", "label": "Indice boursier TUNINDEX"},
+}
+
+
+_DATE_DDMM_RE = re.compile(r"^\s*(\d{1,2})/(\d{1,2})\s*$")
+
+
+def _parse_ddmm_with_current_year(text: str, fallback_today: dt.date | None = None) -> dt.date | None:
+    """
+    indicateurs.jsp affiche les dates au format DD/MM sans année.
+    On suppose l'année courante (avec heuristique pour le passage à l'an précédent
+    si la date est dans le futur de plus de 30 jours).
+    """
+    if not text:
+        return None
+    m = _DATE_DDMM_RE.match(text.strip())
+    if not m:
+        return None
+    d, mo = int(m.group(1)), int(m.group(2))
+    today = fallback_today or dt.date.today()
+    try:
+        candidate = dt.date(today.year, mo, d)
+    except ValueError:
+        return None
+    # Heuristique : si la date "candidate" est dans plus de 30j dans le futur,
+    # c'est probablement l'année dernière (rare mais possible début janvier).
+    if (candidate - today).days > 30:
+        candidate = candidate.replace(year=today.year - 1)
+    return candidate
+
+
+_BCT_MOD_CONTENT_CLASS_RE = re.compile(r"bct-mod-content-(\d+)")
+
+
+def parse_indicators_page(html: str) -> list[dict[str, Any]]:
+    """
+    Parse https://www.bct.gov.tn/bct/siteprod/indicateurs.jsp.
+
+    Renvoie une liste de dicts, un par section :
+        {
+            "section_id": 6,
+            "type": "recettes_touristiques",
+            "label": "Recettes touristiques cumulées",
+            "unite": "MDT",
+            "date_cotation": date(2026, 5, 10) | None,
+            "row_label": "Indice TUNINDEX(base 1000...)" | None,
+            "valeur_principale": Decimal("2224.2") | None,
+            "valeurs_brutes": [Decimal, Decimal, ...],
+            "raw_snippet": "..."
+        }
+    """
+    soup = BeautifulSoup(html, "lxml")
+    today = dt.date.today()
+
+    results: list[dict[str, Any]] = []
+
+    # On itère sur tous les tbody.bct-mod-content-N
+    for tbody in soup.find_all("tbody", class_=_BCT_MOD_CONTENT_CLASS_RE):
+        cls_attr = tbody.get("class") or []
+        # Récupère le numéro de section depuis la classe
+        section_id = None
+        for c in cls_attr:
+            m = _BCT_MOD_CONTENT_CLASS_RE.search(c)
+            if m:
+                section_id = int(m.group(1))
+                break
+        if section_id is None:
+            continue
+
+        mapping = _SECTION_MAPPING.get(section_id)
+        if mapping is None:
+            # Section non mappée : on l'ignore (ou on pourrait la stocker en générique)
+            continue
+
+        # Pour chaque <tr> dans le tbody (en général un seul, parfois plus)
+        rows = tbody.find_all("tr")
+        for tr in rows:
+            tds = tr.find_all("td")
+            if len(tds) < 3:
+                continue
+
+            # Convention observée :
+            #   td[0] = label (souvent vide, parfois "Indice TUNINDEX...")
+            #   td[1] = date au format DD/MM (souvent vide)
+            #   td[2..N] = valeurs numériques
+            row_label = tds[0].get_text(strip=True) or None
+            date_text = tds[1].get_text(strip=True)
+            date_cotation = _parse_ddmm_with_current_year(date_text, fallback_today=today)
+
+            valeurs_brutes: list[Decimal] = []
+            for td in tds[2:]:
+                val = _to_decimal_fr(td.get_text(strip=True))
+                if val is not None:
+                    valeurs_brutes.append(val)
+
+            valeur_principale = valeurs_brutes[0] if valeurs_brutes else None
+
+            # Si toute la ligne est vide (ex : XI un jour sans cotation), on saute
+            if valeur_principale is None and not valeurs_brutes and not row_label:
+                continue
+
+            results.append(
+                {
+                    "section_id": section_id,
+                    "type": mapping["type"],
+                    "label": mapping["label"],
+                    "unite": mapping["unite"],
+                    "date_cotation": date_cotation,
+                    "row_label": row_label,
+                    "valeur_principale": valeur_principale,
+                    "valeurs_brutes": [str(v) for v in valeurs_brutes],
+                    "raw_snippet": str(tr)[:600],
+                }
+            )
+
+    return results

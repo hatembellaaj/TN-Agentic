@@ -1,0 +1,76 @@
+{
+  "name": "Agent Samedi - Billets & monnaies en circulation (10h00)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 6"
+            }
+          ]
+        }
+      },
+      "id": "cron-sat-10",
+      "name": "Cron samedi 10h00 (Africa/Tunis)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://editorial-core:8000/api/agents/saturday/run",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {"fullResponse": false, "responseFormat": "json"}
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"trigger_scrape\": true,\n  \"async_mode\": false\n}"
+      },
+      "id": "run-saturday",
+      "name": "Run agent samedi",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "content": "📅 Tous les samedis à 10h00.\nL'agent collecte index.jsp + indicateurs.jsp,\nlit l'historique des billets & monnaies, et publie\nun article hebdomadaire sur l'évolution de la masse fiduciaire.",
+        "height": 140,
+        "width": 340,
+        "color": 6
+      },
+      "id": "sticky-info",
+      "name": "Note planning",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 480]
+    }
+  ],
+  "connections": {
+    "Cron samedi 10h00 (Africa/Tunis)": {
+      "main": [[{"node": "Run agent samedi", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Tunis",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "tags": [
+    {"name": "TN-Agentic", "createdAt": "2026-05-18T00:00:00.000Z"},
+    {"name": "Sprint 3", "createdAt": "2026-05-18T00:00:00.000Z"}
+  ],
+  "pinData": {},
+  "versionId": "1",
+  "meta": {"templateCredsSetupCompleted": false, "instanceId": "tn-agentic-poc"}
+}

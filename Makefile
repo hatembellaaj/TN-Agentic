@@ -65,10 +65,34 @@ run-rates: ## Déclenche l'agent taux de change BCT manuellement (synchrone)
 	curl -s -X POST http://localhost:$$PORT/api/agents/exchange-rates/run \
 	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
 
-preview-bct: ## Aperçu sans écriture base : voir ce que le parser BCT extrait
+preview-bct: ## Aperçu sans écriture base : voir ce que le parser BCT extrait (index.jsp)
 	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
 	PORT=$${PORT:-18090}; \
 	curl -s http://localhost:$$PORT/scraper-bct/preview | python3 -m json.tool
+
+preview-indicators: ## Aperçu sans écriture base : indicateurs.jsp (11 sections)
+	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
+	PORT=$${PORT:-18090}; \
+	curl -s http://localhost:$$PORT/scraper-bct/preview-indicators | python3 -m json.tool
+
+run-saturday: ## Déclenche l'agent samedi (billets & monnaies en circulation)
+	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
+	PORT=$${PORT:-18090}; \
+	echo "→ POST http://localhost:$$PORT/api/agents/saturday/run" ; \
+	curl -s -X POST http://localhost:$$PORT/api/agents/saturday/run \
+	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
+
+run-sunday: ## Déclenche l'agent dimanche (récap économique hebdomadaire)
+	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
+	PORT=$${PORT:-18090}; \
+	echo "→ POST http://localhost:$$PORT/api/agents/sunday/run" ; \
+	curl -s -X POST http://localhost:$$PORT/api/agents/sunday/run \
+	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
+
+collect-all-bct: ## Collecte index.jsp + indicateurs.jsp en un seul appel (en base)
+	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
+	PORT=$${PORT:-18090}; \
+	curl -s -X POST http://localhost:$$PORT/scraper-bct/collect-all | python3 -m json.tool
 
 # ----------------------------------------------------------
 # Accès / debug

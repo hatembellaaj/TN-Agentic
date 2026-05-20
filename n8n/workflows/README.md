@@ -23,7 +23,5 @@ docker compose exec n8n n8n update:workflow --id=<workflow-id> --active=true
 | --- | --- | --- | --- |
 | `agent-meteo.json` | 1 | Cron `0 6 * * *` Africa/Tunis | POST `http://editorial-core:8000/api/agents/weather/run` |
 | `agent-taux-change.json` | 2 | Cron `45 9 * * 1-5` Africa/Tunis | POST `http://editorial-core:8000/api/agents/exchange-rates/run` |
-
-## Sprints suivants
-
-- Sprint 3 : `agent-samedi.json`, `agent-dimanche.json` — cron `0 10 * * 6` et `0 10 * * 0`
+| `agent-samedi.json` | 3 | Cron `0 10 * * 6` Africa/Tunis | POST `http://editorial-core:8000/api/agents/saturday/run` |
+| `agent-dimanche.json` | 3 | Cron `0 10 * * 0` Africa/Tunis | POST `http://editorial-core:8000/api/agents/sunday/run` |

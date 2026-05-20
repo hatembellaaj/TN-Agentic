@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.agents.exchange_rates import run_exchange_rates_agent
+from app.agents.saturday_billets import run_saturday_agent
+from app.agents.sunday_recap import run_sunday_agent
 from app.agents.weather import run_weather_agent
 from app.db import get_session
 
@@ -117,6 +119,64 @@ def run_exchange_rates(
 
     result = run_exchange_rates_agent(
         session, execution_id=exec_id, trigger_scrape=payload.trigger_scrape
+    )
+    if result.get("status") == "error":
+        raise HTTPException(500, result)
+    return result
+
+
+@router.post("/saturday/run", response_model=dict[str, Any])
+def run_saturday(
+    background_tasks: BackgroundTasks,
+    payload: RunRequest | None = None,
+    session: Session = Depends(get_session),
+):
+    """
+    Déclenche l'agent samedi : article sur l'évolution hebdomadaire des billets
+    et monnaies en circulation (Sprint 3).
+    """
+    payload = payload or RunRequest()
+    exec_id = None
+    if payload.execution_id:
+        try:
+            exec_id = uuid.UUID(payload.execution_id)
+        except ValueError as exc:
+            raise HTTPException(400, "execution_id doit être un UUID") from exc
+    result = run_saturday_agent(
+        session, execution_id=exec_id, trigger_scrape=payload.trigger_scrape
+    )
+    if result.get("status") == "error":
+        raise HTTPException(500, result)
+    return result
+
+
+class SundayRunRequest(RunRequest):
+    """Permet de surcharger le modèle Claude (Sonnet par défaut, Opus si désiré)."""
+    model_override: str | None = None
+
+
+@router.post("/sunday/run", response_model=dict[str, Any])
+def run_sunday(
+    background_tasks: BackgroundTasks,
+    payload: SundayRunRequest | None = None,
+    session: Session = Depends(get_session),
+):
+    """
+    Déclenche l'agent dimanche : grand récapitulatif économique hebdomadaire
+    (Sprint 3). Peut basculer sur Opus via `model_override`.
+    """
+    payload = payload or SundayRunRequest()
+    exec_id = None
+    if payload.execution_id:
+        try:
+            exec_id = uuid.UUID(payload.execution_id)
+        except ValueError as exc:
+            raise HTTPException(400, "execution_id doit être un UUID") from exc
+    result = run_sunday_agent(
+        session,
+        execution_id=exec_id,
+        trigger_scrape=payload.trigger_scrape,
+        model_override=payload.model_override,
     )
     if result.get("status") == "error":
         raise HTTPException(500, result)
