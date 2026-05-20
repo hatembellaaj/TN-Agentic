@@ -7,8 +7,10 @@ import datetime as dt
 import json
 from typing import Any
 
+from app.prompts.glossary import BCT_GLOSSARY
 
-SATURDAY_SYSTEM_PROMPT = """Tu es un journaliste économique senior pour Tunisie Numérique. Tu rédiges dans le style sobre, factuel et précis du Financial Times.
+
+_BODY = """Tu es un journaliste économique senior pour Tunisie Numérique. Tu rédiges dans le style sobre, factuel et précis du Financial Times.
 
 CONTEXTE ÉDITORIAL
 - Article hebdomadaire publié le samedi.
@@ -49,6 +51,9 @@ CONTRAINTES STRICTES
 - Citer la BCT comme source.
 - Pas d'émoji.
 - Tous les chiffres doivent venir des données."""
+
+
+SATURDAY_SYSTEM_PROMPT = BCT_GLOSSARY + "\n────────────────────────────────────────\n\n" + _BODY
 
 
 def build_user_message(

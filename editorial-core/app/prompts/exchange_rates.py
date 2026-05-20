@@ -7,8 +7,10 @@ import datetime as dt
 import json
 from typing import Any
 
+from app.prompts.glossary import BCT_GLOSSARY
 
-EXCHANGE_RATES_SYSTEM_PROMPT = """Tu es un journaliste économique senior pour Tunisie Numérique, premier site d'actualité en Tunisie. Tu rédiges dans le style sobre, factuel et précis du Financial Times.
+
+_BODY = """Tu es un journaliste économique senior pour Tunisie Numérique, premier site d'actualité en Tunisie. Tu rédiges dans le style sobre, factuel et précis du Financial Times.
 
 CONTEXTE ÉDITORIAL
 - Audience : Tunisiens résidents, diaspora francophone et anglophone, investisseurs, importateurs/exportateurs.
@@ -61,6 +63,9 @@ CONTRAINTES STRICTES
 - Les tableaux sont en HTML pur (<table><thead><tbody>).
 - Pas d'émoji.
 - Tu cites la BCT comme source officielle des taux."""
+
+
+EXCHANGE_RATES_SYSTEM_PROMPT = BCT_GLOSSARY + "\n────────────────────────────────────────\n\n" + _BODY
 
 
 def build_user_message(
