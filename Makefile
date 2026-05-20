@@ -58,6 +58,18 @@ run-weather: ## Déclenche l'agent météo manuellement (synchrone)
 	curl -s -X POST http://localhost:$$PORT/api/agents/weather/run \
 	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
 
+run-rates: ## Déclenche l'agent taux de change BCT manuellement (synchrone)
+	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
+	PORT=$${PORT:-18090}; \
+	echo "→ POST http://localhost:$$PORT/api/agents/exchange-rates/run" ; \
+	curl -s -X POST http://localhost:$$PORT/api/agents/exchange-rates/run \
+	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
+
+preview-bct: ## Aperçu sans écriture base : voir ce que le parser BCT extrait
+	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
+	PORT=$${PORT:-18090}; \
+	curl -s http://localhost:$$PORT/scraper-bct/preview | python3 -m json.tool
+
 # ----------------------------------------------------------
 # Accès / debug
 # ----------------------------------------------------------

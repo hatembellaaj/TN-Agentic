@@ -1,0 +1,277 @@
+"""
+Parseur du HTML de https://www.bct.gov.tn/bct/siteprod/index.jsp.
+
+Deux blocs extraits :
+1. "COURS MOYENS DES DEVISES DD/MM/YYYY" → 7 devises (CAD, USD, GBP, JPY, MAD, EUR, LYD)
+2. "Principaux Indicateurs" → TM, taux directeur, TMM, Compte Trésor,
+   Avoirs nets MDT + jours d'importation, Billets et monnaies, Refinancement.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import re
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from bs4 import BeautifulSoup, Tag
+
+
+# ============================================================
+# DEVISES
+# ============================================================
+
+_DEVISE_ALT_RE = re.compile(r"^([A-Z]{3})/CHF", re.IGNORECASE)
+_DATE_FR_RE = re.compile(r"(\d{2})/(\d{2})/(\d{4})")
+
+
+def _to_decimal_fr(text: str) -> Decimal | None:
+    """Convertit '3,3907' / '1 234,56' en Decimal('3.3907') / Decimal('1234.56')."""
+    if text is None:
+        return None
+    cleaned = text.strip().replace("\xa0", "").replace(" ", "").replace(",", ".")
+    try:
+        return Decimal(cleaned)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _to_int_fr(text: str) -> int | None:
+    if text is None:
+        return None
+    cleaned = text.strip().replace("\xa0", "").replace(" ", "").replace(",", "")
+    try:
+        return int(cleaned)
+    except ValueError:
+        # Peut être un float du genre "1.0"
+        try:
+            return int(float(cleaned))
+        except ValueError:
+            return None
+
+
+def _parse_date_fr(text: str) -> dt.date | None:
+    m = _DATE_FR_RE.search(text or "")
+    if not m:
+        return None
+    d, mo, y = m.group(1, 2, 3)
+    try:
+        return dt.date(int(y), int(mo), int(d))
+    except ValueError:
+        return None
+
+
+def parse_devises(html: str) -> tuple[list[dict[str, Any]], dt.date | None]:
+    """
+    Renvoie (liste devises, date_cotation).
+
+    Chaque devise est un dict avec : code, unite, valeur_brute, taux_moyen_pour_1, raw_html.
+    Le `taux_moyen_pour_1` est normalisé à 1 unité de la devise étrangère (utile pour comparer
+    JPY à EUR : on stocke partout "1 X = N TND").
+    """
+    soup = BeautifulSoup(html, "lxml")
+
+    # Trouve le titre du bloc devises
+    h3 = soup.find(
+        "h3",
+        string=lambda t: t and "COURS MOYENS DES DEVISES" in t.upper(),
+    )
+    date_cotation: dt.date | None = None
+    if h3:
+        date_cotation = _parse_date_fr(h3.get_text())
+
+    # Le conteneur est le <div class="content flags"> qui suit le h3
+    container = None
+    if h3:
+        container = h3.find_next("div", class_="content flags")
+    if container is None:
+        # Fallback : on cherche tout div qui contient un <img alt='*/CHF'>
+        for div in soup.find_all("div", class_="content"):
+            if div.find("img", alt=_DEVISE_ALT_RE):
+                container = div
+                break
+
+    devises: list[dict[str, Any]] = []
+    if container is None:
+        return devises, date_cotation
+
+    # Chaque devise est un <div> direct contenant un <img alt='XXX/CHF'>
+    for div in container.find_all("div"):
+        img = div.find("img", alt=_DEVISE_ALT_RE)
+        if not img:
+            continue
+        # Évite les doubles : on prend seulement les divs qui sont des "lignes" complètes
+        if img.parent and img.parent.name != "div":
+            continue
+        m = _DEVISE_ALT_RE.match(img.get("alt", ""))
+        if not m:
+            continue
+        code = m.group(1).upper()
+        # Récupère les deux <b> de la ligne dans l'ordre (unité, valeur)
+        bolds = div.find_all("b")
+        if len(bolds) < 2:
+            continue
+        unite = _to_int_fr(bolds[0].get_text())
+        valeur_brute = _to_decimal_fr(bolds[1].get_text())
+        if unite is None or valeur_brute is None or unite == 0:
+            continue
+        taux_par_1 = (valeur_brute / Decimal(unite)).quantize(Decimal("0.000001"))
+        devises.append(
+            {
+                "code": code,
+                "unite": unite,
+                "valeur_brute": valeur_brute,
+                "taux_moyen_pour_1": taux_par_1,
+                "raw_html": str(div)[:1000],
+            }
+        )
+
+    # Dé-doublonne par code (au cas où la page change)
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for d in devises:
+        if d["code"] in seen:
+            continue
+        seen.add(d["code"])
+        deduped.append(d)
+    return deduped, date_cotation
+
+
+# ============================================================
+# INDICATEURS MACRO
+# ============================================================
+
+# Patterns "label → indicateur_type, unite, regex"
+# Note : on opère sur le texte décodé (BS4 résout déjà &eacute; etc.).
+_INDICATOR_PATTERNS: list[dict[str, Any]] = [
+    {
+        "type": "TM",
+        "unite": "%",
+        "regex": re.compile(
+            r"Taux du marché monétaire\s*\(TM\)\s*au\s+(\d{2}/\d{2}/\d{4})\s*:\s*([\d ,.]+)\s*%",
+            re.IGNORECASE,
+        ),
+    },
+    {
+        "type": "taux_directeur",
+        "unite": "%",
+        "regex": re.compile(
+            r"Taux d'intérêt directeur\s*au\s+(\d{2}/\d{2}/\d{4})\s*:\s*([\d ,.]+)\s*%",
+            re.IGNORECASE,
+        ),
+    },
+    {
+        "type": "TMM",
+        "unite": "%",
+        "regex": re.compile(
+            r"Taux moyen du marché monétaire\s*\(TMM\)\s*du mois d'?([\wéûôîè ]+\d{4})\s*:\s*([\d ,.]+)\s*%",
+            re.IGNORECASE,
+        ),
+        # Ce pattern renvoie (période_textuelle, valeur) au lieu de (date, valeur)
+        "is_monthly": True,
+    },
+    {
+        "type": "TRE",
+        "unite": "%",
+        "regex": re.compile(
+            r"Taux de rémunération de l'épargne\s*\(TRE\)\s*du mois de\s+([\wéûôîè ]+\d{4})\s*:\s*([\d ,.]+)\s*%",
+            re.IGNORECASE,
+        ),
+        "is_monthly": True,
+    },
+    {
+        "type": "compte_tresor",
+        "unite": "MDT",
+        "regex": re.compile(
+            r"Compte courant du Trésor\s*au\s+(\d{2}/\d{2}/\d{4})\s*:\s*([\d ,.]+)\s*MDT",
+            re.IGNORECASE,
+        ),
+    },
+    {
+        "type": "avoirs_nets_mdt",
+        "unite": "MDT",
+        "regex": re.compile(
+            r"Avoirs nets en devises\s*au\s+(\d{2}/\d{2}/\d{4}).*?en MDT\s*:?\s*([\d ,.]+)",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    },
+    {
+        "type": "avoirs_nets_jours_import",
+        "unite": "jours",
+        "regex": re.compile(
+            r"Avoirs nets en devises\s*au\s+(\d{2}/\d{2}/\d{4}).*?en jours d'importation\s*:?\s*([\d ,.]+)",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    },
+    {
+        "type": "billets_circulation",
+        "unite": "MDT",
+        "regex": re.compile(
+            r"Billets et monnaies en circulation\s*au\s+(\d{2}/\d{2}/\d{4})\s*:?\s*([\d ,.]+)\s*MDT",
+            re.IGNORECASE,
+        ),
+    },
+    {
+        "type": "refinancement",
+        "unite": "MDT",
+        "regex": re.compile(
+            r"Volume global de refinancement\s*au\s+(\d{2}/\d{2}/\d{4})\s*:\s*([\d ,.]+)\s*MDT",
+            re.IGNORECASE,
+        ),
+    },
+]
+
+
+def parse_indicators(html: str) -> list[dict[str, Any]]:
+    """
+    Renvoie une liste de dicts : type, valeur, unite, date_cotation (date ou None),
+    periode_str (pour les indicateurs mensuels), raw_snippet.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    # On opère sur le texte décodé global pour éviter les entités HTML brutes
+    page_text = soup.get_text(" ", strip=True)
+    # Nettoyage des espaces multiples
+    page_text = re.sub(r"\s+", " ", page_text)
+
+    results: list[dict[str, Any]] = []
+    for pat in _INDICATOR_PATTERNS:
+        m = pat["regex"].search(page_text)
+        if not m:
+            continue
+        date_or_period, value_str = m.group(1), m.group(2)
+        valeur = _to_decimal_fr(value_str)
+        if valeur is None:
+            continue
+
+        if pat.get("is_monthly"):
+            date_obj = None
+            periode_str = date_or_period.strip()
+        else:
+            date_obj = _parse_date_fr(date_or_period)
+            periode_str = None
+
+        results.append(
+            {
+                "type": pat["type"],
+                "valeur": valeur,
+                "unite": pat["unite"],
+                "date_cotation": date_obj,
+                "periode_str": periode_str,
+                "raw_snippet": m.group(0)[:300],
+            }
+        )
+    return results
+
+
+# ============================================================
+# Helper haut niveau : tout en un appel
+# ============================================================
+
+def parse_bct_index(html: str) -> dict[str, Any]:
+    """Parse en une fois devises + indicateurs."""
+    devises, date_cotation = parse_devises(html)
+    indicators = parse_indicators(html)
+    return {
+        "date_cotation": date_cotation,
+        "devises": devises,
+        "indicators": indicators,
+    }

@@ -1,0 +1,109 @@
+{
+  "name": "Agent Taux de Change - Quotidien 09h45 L-V",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "45 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "cron-945",
+      "name": "Cron 09h45 lundi-vendredi (Africa/Tunis)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://editorial-core:8000/api/agents/exchange-rates/run",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"trigger_scrape\": true,\n  \"async_mode\": false\n}"
+      },
+      "id": "run-rates-agent",
+      "name": "Run agent taux de change",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "content": "✅ Agent taux de change exécuté.\nDevises : {{ $json.devises_count }}\nVariations : {{ $json.variations_calculees }}\nIndicateurs notables : {{ $json.indicateurs_notables }}\nDurée : {{ $json.duree_secondes }}s\nexecution_id : {{ $json.execution_id }}",
+        "height": 160,
+        "width": 320,
+        "color": 4
+      },
+      "id": "sticky-ok",
+      "name": "Succès note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "content": "📅 Cron : 09:45 lundi à vendredi (timezone Africa/Tunis).\nLa BCT publie ses taux du jour entre 09:00 et 09:30, on attend 15 min de marge.\nLe samedi/dimanche : pas d'exécution (marchés fermés).",
+        "height": 140,
+        "width": 320,
+        "color": 6
+      },
+      "id": "sticky-info",
+      "name": "Note planning",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 480]
+    }
+  ],
+  "connections": {
+    "Cron 09h45 lundi-vendredi (Africa/Tunis)": {
+      "main": [
+        [
+          {
+            "node": "Run agent taux de change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Tunis",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "tags": [
+    {
+      "name": "TN-Agentic",
+      "createdAt": "2026-05-18T00:00:00.000Z"
+    },
+    {
+      "name": "Sprint 2",
+      "createdAt": "2026-05-18T00:00:00.000Z"
+    }
+  ],
+  "pinData": {},
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "tn-agentic-poc"
+  }
+}

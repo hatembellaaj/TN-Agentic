@@ -17,14 +17,13 @@ docker compose exec n8n n8n import:workflow --input=/workflows/agent-meteo.json
 docker compose exec n8n n8n update:workflow --id=<workflow-id> --active=true
 ```
 
-## Workflows fournis (Sprint 1)
+## Workflows fournis
 
-| Fichier | Déclenchement | Action |
-| --- | --- | --- |
-| `agent-meteo.json` | Cron `0 6 * * *` Africa/Tunis | POST `http://editorial-core:8000/api/agents/weather/run` |
+| Fichier | Sprint | Déclenchement | Action |
+| --- | --- | --- | --- |
+| `agent-meteo.json` | 1 | Cron `0 6 * * *` Africa/Tunis | POST `http://editorial-core:8000/api/agents/weather/run` |
+| `agent-taux-change.json` | 2 | Cron `45 9 * * 1-5` Africa/Tunis | POST `http://editorial-core:8000/api/agents/exchange-rates/run` |
 
 ## Sprints suivants
 
-- Sprint 2 : `agent-taux-change.json` — cron `45 9 * * 1-5`
 - Sprint 3 : `agent-samedi.json`, `agent-dimanche.json` — cron `0 10 * * 6` et `0 10 * * 0`
-- Scraper indicateurs BCT : `scraper-indicateurs.json` — cron `0 10 * * 1-5`

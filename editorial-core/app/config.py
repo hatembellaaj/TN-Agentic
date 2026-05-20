@@ -36,8 +36,9 @@ class Settings(BaseSettings):
     WP_EN_USERNAME: str = ""
     WP_EN_APP_PASSWORD: str = ""
 
-    # Scraper interne
+    # Scrapers internes
     SCRAPER_WEATHER_URL: str = "http://scraper-weather:8001"
+    SCRAPER_BCT_URL: str = "http://scraper-bct:8002"
 
     LOG_LEVEL: str = "INFO"
     SERVICE_NAME: str = "editorial-core"
