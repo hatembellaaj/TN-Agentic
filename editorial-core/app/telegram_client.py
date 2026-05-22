@@ -1,10 +1,11 @@
 """
 Client Telegram Bot API : envoi de notifications au journaliste validateur.
+Format HTML (plus robuste que MarkdownV2 face aux titres avec caractères spéciaux).
 Échec non bloquant pour le pipeline.
 """
 from __future__ import annotations
 
-import json
+import html
 import logging
 import uuid
 from typing import Any
@@ -19,10 +20,11 @@ from app.models import NotificationLog
 logger = logging.getLogger(__name__)
 
 
-def _escape_md_v2(text: str) -> str:
-    """Échappe les caractères réservés Telegram MarkdownV2."""
-    specials = r"_*[]()~`>#+-=|{}.!"
-    return "".join("\\" + c if c in specials else c for c in text)
+def _e(text: str) -> str:
+    """Échappe les caractères HTML pour Telegram parse_mode=HTML (<, >, &)."""
+    if text is None:
+        return ""
+    return html.escape(str(text), quote=False)
 
 
 class TelegramClient:
@@ -45,7 +47,7 @@ class TelegramClient:
                 json={
                     "chat_id": self.chat_id,
                     "text": text,
-                    "parse_mode": "MarkdownV2",
+                    "parse_mode": "HTML",
                     "disable_web_page_preview": True,
                 },
             )
@@ -69,25 +71,30 @@ class TelegramClient:
         articles_summary : [{"langue": "fr", "public_url": "...", "titre": "..."}, ...]
         Renvoie True si succès.
         """
-        # Construction du message MarkdownV2
-        lines = [
-            "*🤖 TN Journaliste IA*",
-            f"📅 Date : {_escape_md_v2(date_iso)}",
-            f"📰 Thème : {_escape_md_v2(theme)}",
+        # Lignes HTML : on échappe SEULEMENT le contenu utilisateur.
+        # Les balises <b>, <a>, etc. sont écrites en clair.
+        lines: list[str] = [
+            "<b>🤖 TN Journaliste IA</b>",
+            f"📅 Date : {_e(date_iso)}",
+            f"📰 Thème : {_e(theme)}",
             "",
-            "*Brouillons générés :*",
+            "<b>Brouillons générés :</b>",
         ]
         for art in articles_summary:
-            url = art.get("public_url") or art.get("dashboard_url") or "(lien indisponible)"
-            label = "Français" if art["langue"] == "fr" else "English"
-            lines.append(f"• [{label}]({url})")
+            url = art.get("public_url") or art.get("dashboard_url") or ""
+            label = "Français" if art.get("langue") == "fr" else "English"
+            titre = _e(art.get("titre") or "")
+            if url:
+                lines.append(f'• <a href="{_e(url)}">{label}</a> — {titre}')
+            else:
+                lines.append(f"• {label} — {titre} (lien indisponible)")
 
         lines.extend(
             [
                 "",
-                f"🧠 Modèle : {_escape_md_v2(modele)}",
+                f"🧠 Modèle : {_e(modele)}",
                 f"⏱ Exécution : {duree_secondes}s",
-                f"✅ Statut : {_escape_md_v2(statut)}",
+                f"✅ Statut : {_e(statut)}",
             ]
         )
 

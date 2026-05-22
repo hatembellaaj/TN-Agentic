@@ -76,6 +76,22 @@ def _is_allowed(value: float, allowed_pool: set[float]) -> bool:
     return False
 
 
+def _is_date_component(value: float) -> bool:
+    """
+    Vrai si la valeur peut raisonnablement être un composant de date :
+      - jour     1..31
+      - mois     1..12
+      - année    1900..2200
+    Ces chiffres apparaissent légitimement dans tous les articles (« 22 mai
+    2026 », « semaine du 19/05/2026 », etc.) et ne doivent pas déclencher
+    une alerte hallucination.
+    """
+    if not value.is_integer():
+        return False
+    v = int(value)
+    return (1 <= v <= 31) or (1900 <= v <= 2200)
+
+
 def check_hallucinations(
     contenu_html: str, weather_rows: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -85,19 +101,22 @@ def check_hallucinations(
 
     "passed"   : tous les chiffres trouvent une source plausible.
     "suspected": au moins un chiffre ne correspond à aucune donnée → révision manuelle.
+
+    Sont systématiquement ignorés (non considérés comme orphelins) :
+      - les composants de date (1-31, 1900-2200)
+      - les valeurs présentes dans le pool des données source
+      - les valeurs proches (tolérance TEMPERATURE_TOLERANCE) d'une valeur du pool
     """
     allowed_pool = _build_allowed_pool(weather_rows)
     found = _extract_numbers(contenu_html)
 
     orphans = []
-    # On ignore les "petits nombres structurels" (1..30, ce sont aussi des dates ou
-    # des numéros de section). On vérifie surtout les valeurs > 30 ou les décimales.
     for value in found:
-        # Ignore les entiers de 0 à 31 (numéros de jour, ordre d'affichage déjà whitelistés)
-        if value.is_integer() and 0 <= value <= 31 and value in allowed_pool:
+        if _is_date_component(value):
             continue
-        if not _is_allowed(value, allowed_pool):
-            orphans.append(value)
+        if _is_allowed(value, allowed_pool):
+            continue
+        orphans.append(value)
 
     return {
         "status": "passed" if not orphans else "suspected",
