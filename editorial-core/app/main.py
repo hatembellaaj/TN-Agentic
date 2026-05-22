@@ -11,6 +11,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
+from app.api.admin import admin_router
 from app.api.routes import router as api_router
 from app.config import settings
 from app.dashboard.routes import router as dashboard_router
@@ -47,4 +48,5 @@ def root():
 
 
 app.include_router(api_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 app.include_router(dashboard_router)

@@ -29,11 +29,15 @@ class Settings(BaseSettings):
     PUBLIC_BASE_URL: str = "http://localhost"
 
     # WordPress (utilisé si PUBLISHER_BACKEND=wordpress)
+    # Auth JWT via plugin "JWT Authentication for WP REST API"
     WP_FR_BASE_URL: str = ""
     WP_FR_USERNAME: str = ""
-    WP_FR_APP_PASSWORD: str = ""
+    WP_FR_PASSWORD: str = ""
     WP_EN_BASE_URL: str = ""
     WP_EN_USERNAME: str = ""
+    WP_EN_PASSWORD: str = ""
+    # Champs Application Password historiques (non utilisés, conservés pour rétro-compat)
+    WP_FR_APP_PASSWORD: str = ""
     WP_EN_APP_PASSWORD: str = ""
 
     # Scrapers internes

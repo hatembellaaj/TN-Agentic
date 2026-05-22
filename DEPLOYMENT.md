@@ -175,17 +175,94 @@ Cron host (recommandé) :
 0 3 * * * docker compose -f /opt/tn-agentic/docker-compose.yml exec -T postgres pg_dump -U tn_agent tn_agentic | gzip > /var/backups/tn-agentic/$(date +\%Y\%m\%d).sql.gz
 ```
 
-## 10. Bascule vers WordPress (quand l'API sera dispo)
+## 10. Bascule vers WordPress (authentification JWT)
 
-1. Sur les WP FR et EN, créer un user `tn_agent_ia` (rôle Editor).
-2. Générer un Application Password pour chacun (Users → Profile → Application Passwords).
-3. Renseigner dans `.env` :
-   - `PUBLISHER_BACKEND=wordpress`
-   - `WP_FR_BASE_URL`, `WP_FR_USERNAME`, `WP_FR_APP_PASSWORD`
-   - idem pour EN
-4. `docker compose restart editorial-core`
+L'agent publie en brouillon (`status=draft`) via l'API REST WordPress avec authentification JWT.
 
-Aucune autre modification de code n'est nécessaire — le pattern Publisher abstrait s'occupe du swap.
+### Pré-requis côté WordPress
+
+1. Installer et activer le plugin **JWT Authentication for WP REST API** :
+   https://wordpress.org/plugins/jwt-authentication-for-wp-rest-api/
+2. Dans `wp-config.php`, ajouter (avant `/* That's all... */`) :
+   ```php
+   define('JWT_AUTH_SECRET_KEY', 'remplacer-par-une-chaine-aleatoire-longue');
+   define('JWT_AUTH_CORS_ENABLE', true);
+   ```
+3. (Optionnel mais recommandé) Créer un utilisateur dédié à l'agent avec un rôle **Editor** et un mot de passe robuste.
+
+### Configuration côté agent
+
+Dans `.env` :
+
+```
+PUBLISHER_BACKEND=wordpress
+
+# Site français
+WP_FR_BASE_URL=https://www.tunisienumerique.com
+WP_FR_USERNAME=root
+WP_FR_PASSWORD=ton_mot_de_passe
+
+# Site anglais (vide = on publie sur le même WP que FR)
+WP_EN_BASE_URL=
+WP_EN_USERNAME=
+WP_EN_PASSWORD=
+```
+
+Puis :
+
+```bash
+docker compose restart editorial-core
+```
+
+### Vérifier la configuration sans publier
+
+```bash
+# Test connexion JWT (n'écrit rien sur WP, juste valide les identifiants)
+curl -s -X POST 'http://localhost:18090/api/admin/wordpress-test?langue=fr' | python3 -m json.tool
+
+# Statut du publisher actuel
+curl -s http://localhost:18090/api/admin/publisher-status | python3 -m json.tool
+```
+
+Attendu en cas de succès :
+```json
+{
+  "ok": true,
+  "base_url": "https://www.tunisienumerique.com",
+  "username": "root",
+  "token_preview": "eyJ0eXAiOiJKV1QiLCJhbGciO…",
+  "token_full_length": 256
+}
+```
+
+Erreurs courantes :
+| Symptôme | Cause | Action |
+| --- | --- | --- |
+| `http_status: 404` | Plugin JWT pas installé/activé | Installer + activer le plugin sur WP |
+| `http_status: 403` ou `[jwt_auth] incorrect_password` | Identifiants invalides | Vérifier user/password dans `.env` |
+| `[jwt_auth] secret_key_not_defined` | `JWT_AUTH_SECRET_KEY` manquant | Ajouter dans `wp-config.php` |
+| Connexion refusée / timeout | URL incorrecte ou firewall | Vérifier `WP_FR_BASE_URL` et accès réseau |
+
+### Cycle JWT
+
+- Le token est demandé une fois puis mis en cache en mémoire (~6 jours).
+- À l'expiration ou sur un 401, l'agent ré-authentifie automatiquement.
+- Pas de rotation manuelle nécessaire pendant le POC.
+
+### Comportement après bascule
+
+À partir du moment où `PUBLISHER_BACKEND=wordpress` est actif :
+- Les articles générés sont posés comme **brouillons** sur WordPress (pas de publication directe).
+- La notification Telegram envoie des liens directs vers l'écran d'édition WP de chaque brouillon (`/wp-admin/post.php?post=ID&action=edit`).
+- Le dashboard local affiche aussi le `wordpress_post_id` et le lien WP pour chaque article.
+- Le journaliste valide manuellement chaque brouillon depuis WP avant publication finale.
+
+### Retour à FilePublisher si besoin
+
+```
+PUBLISHER_BACKEND=file
+```
+puis `docker compose restart editorial-core`. Aucune migration ni code à toucher — c'est juste un swap d'adaptateur côté Publisher.
 
 ## 11. Commandes utiles
 
