@@ -29,16 +29,20 @@ class Settings(BaseSettings):
     PUBLIC_BASE_URL: str = "http://localhost"
 
     # WordPress (utilisé si PUBLISHER_BACKEND=wordpress)
-    # Auth JWT via plugin "JWT Authentication for WP REST API"
+    # Méthode d'authentification :
+    #   - "application_password" (recommandé) : HTTP Basic Auth avec un App Password
+    #     généré dans WP Admin → Profil → Mots de passe d'application. Pas besoin
+    #     de plugin tiers. WP_FR_PASSWORD = l'App Password au format "xxxx xxxx ...".
+    #   - "jwt" : utilise le plugin "JWT Authentication for WP REST API".
+    #     WP_FR_PASSWORD = le mot de passe de connexion WP normal.
+    WP_AUTH_METHOD: Literal["application_password", "jwt"] = "application_password"
+
     WP_FR_BASE_URL: str = ""
     WP_FR_USERNAME: str = ""
     WP_FR_PASSWORD: str = ""
     WP_EN_BASE_URL: str = ""
     WP_EN_USERNAME: str = ""
     WP_EN_PASSWORD: str = ""
-    # Champs Application Password historiques (non utilisés, conservés pour rétro-compat)
-    WP_FR_APP_PASSWORD: str = ""
-    WP_EN_APP_PASSWORD: str = ""
 
     # Scrapers internes
     SCRAPER_WEATHER_URL: str = "http://scraper-weather:8001"
