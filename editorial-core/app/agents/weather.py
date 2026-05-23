@@ -67,8 +67,31 @@ def _trigger_scraper(execution_id: uuid.UUID) -> dict[str, Any]:
         return r.json()
 
 
+def _round_int(val) -> int | None:
+    """Arrondit une valeur numérique à l'entier le plus proche. None → None.
+
+    Règle métier (mise à jour mai 2026) : pour la crédibilité éditoriale, toutes
+    les températures et vitesses de vent sont arrondies à l'entier AVANT d'être
+    envoyées à Claude. Ainsi le LLM ne peut pas écrire « 33,22 °C », il ne voit
+    que « 33 ». La donnée brute reste stockée intacte en base (raw_data_json,
+    temperature_min en Numeric(5,2)) pour les analyses futures.
+    """
+    if val is None:
+        return None
+    try:
+        return int(round(float(val)))
+    except (TypeError, ValueError):
+        return None
+
+
 def _load_today_weather(session: Session) -> list[dict[str, Any]]:
-    """Charge les données weather_data du jour, ordonnées par ordre d'affichage."""
+    """Charge les données weather_data du jour, ordonnées par ordre d'affichage.
+
+    Les températures et la vitesse du vent sont arrondies à l'entier (règle
+    éditoriale non négociable). L'humidité et la pression sont déjà entières en
+    base. L'indice UV reste en décimal (utile pour les seuils de protection),
+    Claude est invité à l'approcher en mots dans le prompt système.
+    """
     today = dt.date.today()
     rows = session.execute(
         select(Governorate, WeatherData)
@@ -86,16 +109,24 @@ def _load_today_weather(session: Session) -> list[dict[str, Any]]:
                 "nom_fr": gov.nom_fr,
                 "nom_en": gov.nom_en or gov.nom_fr,
                 "region": gov.region,
-                "temperature_min": float(wd.temperature_min) if wd.temperature_min is not None else None,
-                "temperature_max": float(wd.temperature_max) if wd.temperature_max is not None else None,
-                "temperature_actuelle": float(wd.temperature_actuelle) if wd.temperature_actuelle is not None else None,
+                # Températures : arrondies à l'entier (règle de crédibilité)
+                "temperature_min": _round_int(wd.temperature_min),
+                "temperature_max": _round_int(wd.temperature_max),
+                "temperature_actuelle": _round_int(wd.temperature_actuelle),
                 "conditions": wd.conditions,
                 "humidite": wd.humidite,
-                "vent_vitesse": float(wd.vent_vitesse) if wd.vent_vitesse is not None else None,
+                # Vent : arrondi à l'entier (règle de crédibilité)
+                "vent_vitesse": _round_int(wd.vent_vitesse),
                 "vent_direction": wd.vent_direction,
                 "pression": wd.pression,
+                # UV : conservé en décimal (Claude est instruit d'approximer en mots)
                 "indice_uv": float(wd.indice_uv) if wd.indice_uv is not None else None,
-                "precipitations_mm": float(wd.precipitations_mm) if wd.precipitations_mm is not None else None,
+                # Précipitations : 1 décimale (0,3 mm vs 0 mm fait une différence)
+                "precipitations_mm": (
+                    round(float(wd.precipitations_mm), 1)
+                    if wd.precipitations_mm is not None
+                    else None
+                ),
             }
         )
     return out
