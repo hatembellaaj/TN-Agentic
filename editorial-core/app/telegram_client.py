@@ -31,8 +31,24 @@ class TelegramClient:
 
     def __init__(self) -> None:
         self.token = settings.TELEGRAM_BOT_TOKEN
-        self.chat_id = settings.TELEGRAM_CHAT_ID
+        self.chat_id_raw = settings.TELEGRAM_CHAT_ID  # peut contenir une liste séparée par virgules
         self.base_url = f"https://api.telegram.org/bot{self.token}"
+
+    def _parse_chat_ids(self) -> list[str]:
+        """
+        Parse TELEGRAM_CHAT_ID en liste.
+
+        Supporte trois formes :
+        - "12345"                 → ["12345"]                       (un destinataire)
+        - "12345,67890,11111"     → ["12345", "67890", "11111"]     (plusieurs destinataires DM)
+        - "-1001234567890"        → ["-1001234567890"]              (un groupe Telegram)
+
+        Pour un groupe Telegram, utiliser le chat_id négatif du groupe (un seul ID,
+        tout le monde dans le groupe reçoit). Pour des DM multiples, séparer par virgules.
+        """
+        if not self.chat_id_raw:
+            return []
+        return [c.strip() for c in str(self.chat_id_raw).split(",") if c.strip()]
 
     @retry(
         stop=stop_after_attempt(3),
@@ -40,12 +56,13 @@ class TelegramClient:
         retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
         reraise=True,
     )
-    def _send(self, text: str) -> dict[str, Any]:
+    def _send_to(self, chat_id: str, text: str) -> dict[str, Any]:
+        """Envoi à UN destinataire. Lève en cas d'erreur HTTP."""
         with httpx.Client(timeout=15.0) as client:
             r = client.post(
                 f"{self.base_url}/sendMessage",
                 json={
-                    "chat_id": self.chat_id,
+                    "chat_id": chat_id,
                     "text": text,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
@@ -53,6 +70,16 @@ class TelegramClient:
             )
             r.raise_for_status()
             return r.json()
+
+    def _send(self, text: str) -> dict[str, Any]:
+        """
+        Compat : envoi vers le PREMIER chat_id configuré.
+        Garde le comportement attendu par les tests existants (un seul destinataire).
+        """
+        ids = self._parse_chat_ids()
+        if not ids:
+            raise RuntimeError("Aucun TELEGRAM_CHAT_ID configuré.")
+        return self._send_to(ids[0], text)
 
     def notify_articles_generated(
         self,
@@ -99,30 +126,38 @@ class TelegramClient:
         )
 
         text = "\n".join(lines)
-
-        try:
-            response = self._send(text)
-            session.add(
-                NotificationLog(
-                    destinataire=self.chat_id,
-                    canal="telegram",
-                    statut="success",
-                    message_envoye=text,
-                    response_telegram_api=response,
-                )
-            )
-            session.commit()
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Echec envoi Telegram")
-            session.add(
-                NotificationLog(
-                    destinataire=self.chat_id,
-                    canal="telegram",
-                    statut="error",
-                    message_envoye=text,
-                    response_telegram_api={"error": str(exc)},
-                )
-            )
-            session.commit()
+        chat_ids = self._parse_chat_ids()
+        if not chat_ids:
+            logger.warning("Aucun TELEGRAM_CHAT_ID configuré, notification ignorée.")
             return False
+
+        # Envoi à chaque destinataire indépendamment. Si l'un d'eux échoue
+        # (chat_id invalide, bloqué...), les autres reçoivent quand même.
+        all_ok = True
+        for chat_id in chat_ids:
+            try:
+                response = self._send_to(chat_id, text)
+                session.add(
+                    NotificationLog(
+                        destinataire=chat_id,
+                        canal="telegram",
+                        statut="success",
+                        message_envoye=text,
+                        response_telegram_api=response,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                all_ok = False
+                logger.exception("Echec envoi Telegram à %s", chat_id)
+                session.add(
+                    NotificationLog(
+                        destinataire=chat_id,
+                        canal="telegram",
+                        statut="error",
+                        message_envoye=text,
+                        response_telegram_api={"error": str(exc)},
+                    )
+                )
+
+        session.commit()
+        return all_ok
