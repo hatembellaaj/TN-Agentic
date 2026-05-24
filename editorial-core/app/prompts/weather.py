@@ -81,34 +81,36 @@ Tu retournes UNIQUEMENT un objet JSON strict (pas de markdown, pas de bloc ```),
 
 STRUCTURE DU CONTENU HTML — STRICTEMENT IMPÉRATIVE
 
-1. INTRO COURTE — un paragraphe <p> de 1 à 2 phrases qui pose la tendance dominante du jour à l'échelle nationale. Pas de titre, on entre direct dans le sujet.
+1. INTRO COURTE — un paragraphe <p> de 2 à 3 phrases qui pose la tendance dominante du jour à l'échelle nationale ET qui mentionne EXPLICITEMENT le gouvernorat le plus chaud et le gouvernorat le plus froid du jour, avec leurs températures (ex. : « Tataouine grimpera à 36°C tandis que Le Kef restera autour de 14°C »). Pas de titre, on entre direct dans le sujet.
 
-2. SECTION « Les régions » — pour chacune des 5 zones ci-dessous, un <h3> suivi d'un <p> de 2 à 4 phrases. Dans chaque paragraphe, parle de ce que les habitants vont vivre (températures ressenties, soleil, vent, pluie, ambiance). PAS un listage robotique des gouvernorats, mais une SYNTHÈSE VIVANTE de la zone, en intégrant 1 ou 2 chiffres-clés au maximum.
+2. SECTION « Les régions » — pour chacune des 5 zones ci-dessous, un <h3> suivi d'un <p> de 2 à 4 phrases. Dans chaque paragraphe, parle de ce que les habitants vont vivre (températures ressenties, soleil, VENT, HUMIDITÉ, pluie, ambiance). PAS un listage robotique des gouvernorats, mais une SYNTHÈSE VIVANTE de la zone, en intégrant 2 à 3 chiffres-clés (températures + vent OU humidité).
 
    - <h3>Grand Tunis</h3> — Tunis, Ariana, Ben Arous, Manouba.
    - <h3>Sahel et Cap Bon</h3> — Sousse, Monastir, Mahdia, Nabeul.
    - <h3>Nord-Ouest</h3> — Bizerte, Béja, Jendouba, Le Kef, Siliana, Zaghouan.
-   - <h3>Centre</h3> — Kairouan, Kasserine, Sidi Bouzid, Sfax.
-   - <h3>Sud</h3> — Gafsa, Tozeur, Kébili, Gabès, Médenine, Tataouine.
+   - <h3>Centre</h3> — Kairouan, Kasserine, Sidi Bouzid.
+   - <h3>Sud</h3> — Sfax, Gafsa, Tozeur, Kébili, Gabès, Médenine, Tataouine.
 
 3. <h3>Trois faits météo marquants</h3> — une <ul> avec EXACTEMENT 3 <li>. Chaque fait est une phrase courte et percutante qui ressort des données (pic de chaleur dans une région, écart thermique notable, pluies attendues, UV élevés, vent fort, etc.).
 
 4. <h3>Conseils pratiques</h3> — un paragraphe <p> OU une courte <ul> avec des recommandations CONCRÈTES selon les conditions réelles du jour : hydratation si chaleur, prudence routière si pluie, vêtements adaptés si écart thermique fort, protection UV si indice élevé, vigilance vent fort, etc.
 
-5. TABLEAU COMPLET REPLIABLE — utilise la balise HTML native <details> avec ce format exact :
+5. TABLEAU COMPLET (toujours visible, PAS replié) — utilise une <table> simple, AFFICHÉE par défaut (ne PAS l'envelopper dans une balise <details> ni <summary>) :
 
-   <details>
-     <summary>Voir toutes les régions (24 gouvernorats)</summary>
-     <table>
-       <thead><tr><th>Gouvernorat</th><th>Min</th><th>Max</th><th>Conditions</th></tr></thead>
-       <tbody>
-         <tr><td>Tunis</td><td>18°C</td><td>26°C</td><td>Ciel clair</td></tr>
-         ...
-       </tbody>
-     </table>
-   </details>
+   <table>
+     <thead>
+       <tr><th>Gouvernorat</th><th>Min</th><th>Max</th><th>Conditions</th><th>Vent</th><th>Humidité</th></tr>
+     </thead>
+     <tbody>
+       <tr><td>Tunis</td><td>18°C</td><td>26°C</td><td>Ciel clair</td><td>12 km/h</td><td>55%</td></tr>
+       ...
+     </tbody>
+   </table>
 
    Les 24 gouvernorats DOIVENT figurer dans le tableau, dans l'ordre indiqué par le champ `ordre` des données.
+
+   IMPORTANT : la ligne du gouvernorat ayant la température **MAXIMALE** du jour ET celle du gouvernorat ayant la température **MINIMALE** doivent être MISES EN GRAS. Pour ce faire, enveloppe TOUTES les cellules <td> de ces deux lignes dans <strong>…</strong>. Exemple :
+   <tr><td><strong>Tataouine</strong></td><td><strong>22°C</strong></td><td><strong>36°C</strong></td><td><strong>Ensoleillé</strong></td><td><strong>18 km/h</strong></td><td><strong>32%</strong></td></tr>
 
 CONTRAINTES STRICTES
 - 450 à 600 mots pour les parties textuelles (hors tableau).
@@ -140,18 +142,34 @@ def build_user_message(
         date_jour.weekday()
     ]
 
+    # Calcul des gouvernorats min/max pour aider Claude à les mettre en valeur
+    govs_with_max = [g for g in weather_rows if g.get("temperature_max") is not None]
+    extreme_max = max(govs_with_max, key=lambda g: g["temperature_max"]) if govs_with_max else None
+    govs_with_min = [g for g in weather_rows if g.get("temperature_min") is not None]
+    extreme_min = min(govs_with_min, key=lambda g: g["temperature_min"]) if govs_with_min else None
+
     # Données structurées (sérialisation propre des Decimal)
     payload = {
         "date_iso": date_jour.isoformat(),
         "jour_fr": jour_fr,
         "jour_en": jour_en,
         "gouvernorats": weather_rows,
+        "extremes_du_jour": {
+            "gouvernorat_le_plus_chaud": (
+                {"nom": extreme_max["nom_fr"], "temperature_max": extreme_max["temperature_max"]}
+                if extreme_max else None
+            ),
+            "gouvernorat_le_plus_froid": (
+                {"nom": extreme_min["nom_fr"], "temperature_min": extreme_min["temperature_min"]}
+                if extreme_min else None
+            ),
+        },
         "zones_recommandees_pour_redaction": {
             "Grand Tunis": ["Tunis", "Ariana", "Ben Arous", "Manouba"],
             "Sahel et Cap Bon": ["Sousse", "Monastir", "Mahdia", "Nabeul"],
             "Nord-Ouest": ["Bizerte", "Béja", "Jendouba", "Le Kef", "Siliana", "Zaghouan"],
-            "Centre": ["Kairouan", "Kasserine", "Sidi Bouzid", "Sfax"],
-            "Sud": ["Gafsa", "Tozeur", "Kébili", "Gabès", "Médenine", "Tataouine"],
+            "Centre": ["Kairouan", "Kasserine", "Sidi Bouzid"],
+            "Sud": ["Sfax", "Gafsa", "Tozeur", "Kébili", "Gabès", "Médenine", "Tataouine"],
         },
     }
 
@@ -165,13 +183,15 @@ DONNÉES (JSON strict — ne pas modifier les chiffres) :
 
 INSTRUCTIONS DE GÉNÉRATION
 1. Produis les versions française (fr) ET anglaise (en) dans la MÊME réponse JSON.
-2. Suis SCRUPULEUSEMENT la structure imposée par le bloc système : intro courte, puis 5 zones en <h3>, puis 3 faits marquants, puis conseils pratiques, puis tableau repliable.
-3. Pour chaque zone, écris en ton JOURNALISTIQUE (ce que les habitants vont vivre, pas une énumération de chiffres). Reste sur 2-4 phrases par zone.
-4. Le tableau repliable doit contenir les 24 gouvernorats dans l'ordre indiqué par le champ `ordre`.
-5. Les 3 faits marquants doivent être tirés FACTUELLEMENT des données (pic de chaleur réel, pluie réelle, écart thermique réel, UV élevés, etc.) — pas d'invention.
-6. Les conseils pratiques doivent être déduits des conditions observées du jour.
-7. Le slug suit exactement : meteo-tunisie-{date_jour.strftime('%Y-%m-%d')} (FR), weather-tunisia-{date_jour.strftime('%Y-%m-%d')} (EN).
-8. NE MENTIONNE PAS la source des données ni l'heure de collecte. L'article s'arrête sur le tableau repliable.
+2. Suis SCRUPULEUSEMENT la structure imposée par le bloc système : intro courte (avec mention des gouvernorats min et max), 5 zones en <h3>, 3 faits marquants, conseils pratiques, tableau complet TOUJOURS VISIBLE (pas dans <details>).
+3. Dans l'INTRO, mentionne explicitement le gouvernorat le plus chaud et le plus froid du jour (cf. `extremes_du_jour` dans le payload). Exemple : « Tataouine devrait grimper à 36°C cet après-midi tandis que Le Kef restera plus frais autour de 14°C. »
+4. Pour chaque zone, écris en ton JOURNALISTIQUE : températures + au moins une mention du vent ou de l'humidité, en lien avec ce que les habitants vont vivre. 2 à 4 phrases par zone.
+5. Le tableau complet contient les 6 colonnes : Gouvernorat, Min, Max, Conditions, Vent, Humidité. Il doit contenir les 24 gouvernorats dans l'ordre indiqué par le champ `ordre`.
+6. Dans le tableau, MEUS EN GRAS (avec <strong>) toutes les cellules des deux lignes correspondant au gouvernorat le plus chaud et au gouvernorat le plus froid.
+7. Les 3 faits marquants doivent être tirés FACTUELLEMENT des données (pic de chaleur réel, pluie, écart thermique, UV, vent, etc.) — pas d'invention.
+8. Les conseils pratiques doivent être déduits des conditions observées du jour.
+9. Le slug suit exactement : meteo-tunisie-{date_jour.strftime('%Y-%m-%d')} (FR), weather-tunisia-{date_jour.strftime('%Y-%m-%d')} (EN).
+10. NE MENTIONNE PAS la source des données ni l'heure de collecte. L'article s'arrête sur le tableau.
 
 Réponds UNIQUEMENT par l'objet JSON, sans aucun texte avant ou après."""
 
