@@ -227,16 +227,19 @@ def run_exchange_rates_agent(
     *,
     execution_id: uuid.UUID | None = None,
     trigger_scrape: bool = True,
-    require_fresh_data: bool = True,
+    force: bool = False,
 ) -> dict[str, Any]:
     """
     Pipeline taux de change BCT.
 
-    :param require_fresh_data: si True (défaut), l'agent SKIP silencieusement quand :
-        - la date de la dernière cotation BCT n'est pas aujourd'hui (BCT pas encore
-          publiée → on attend la prochaine exécution du cron horaire) ;
-        - un article taux_change du jour est déjà en base (idempotence).
-        Mettre à False pour forcer une génération manuelle même sur des données vieilles.
+    Hypothèse d'exécution (validée mai 2026) : la BCT publie ses cotations vers
+    16h Tunis. Le cron tourne UNE FOIS par jour vers 8h Tunis (= 7h UTC) et
+    publie l'article basé sur la cotation BCT la plus récente disponible, même
+    si elle date d'il y a 1-3 jours (jours fériés, week-end, panne BCT). Claude
+    indique clairement la date de mise à jour BCT dans le titre et l'intro.
+
+    :param force: si True, bypass l'idempotence (republie même si un article
+        existe déjà pour cette date de cotation BCT). Utile pour rattrapage manuel.
     """
     if execution_id is None:
         execution_id = uuid.uuid4()
@@ -279,44 +282,33 @@ def run_exchange_rates_agent(
         message=f"{len(devises)} devises chargées (cotation du {latest_date})",
     )
 
-    # --- 2.5 Idempotence : on a déjà publié aujourd'hui ? ---
-    today = dt.date.today()
-    if require_fresh_data:
+    # --- 2.5 Idempotence : article déjà publié pour cette cotation BCT ? ---
+    # On vérifie l'existence par date de cotation BCT (latest_date), pas par
+    # date du jour. Si la BCT n'a pas mis à jour depuis hier et qu'on a déjà
+    # publié hier, on ne republie pas le même contenu.
+    if not force:
         existing = session.scalar(
             select(ArticleGenerated)
             .where(
                 ArticleGenerated.theme == "taux_change",
-                ArticleGenerated.date_publication == today,
+                ArticleGenerated.date_publication == latest_date,
                 ArticleGenerated.langue == "fr",  # on prend FR comme référence
             )
             .limit(1)
         )
         if existing:
-            msg = f"Article taux_change du {today} déjà publié (id={existing.id}), aucune action."
+            msg = (
+                f"Article basé sur la cotation BCT du {latest_date} déjà publié "
+                f"(id={existing.id}). Pas de re-publication tant que la BCT n'a "
+                "pas mis à jour. Pour forcer : force=True."
+            )
             _log_step(session, execution_id, "skip_already_published", "success", message=msg)
             return {
                 "execution_id": str(execution_id),
                 "status": "skipped",
                 "reason": "already_published",
                 "existing_article_id": existing.id,
-                "date_today": today.isoformat(),
-            }
-
-        # --- 2.6 Fraîcheur : la BCT a-t-elle publié aujourd'hui ? ---
-        if latest_date < today:
-            msg = (
-                f"BCT n'a pas encore publié les taux du {today} "
-                f"(dernière cotation disponible : {latest_date}). "
-                "L'agent attend la prochaine exécution du cron."
-            )
-            _log_step(session, execution_id, "skip_stale_data", "success", message=msg)
-            return {
-                "execution_id": str(execution_id),
-                "status": "skipped",
-                "reason": "stale_data",
                 "latest_bct_date": latest_date.isoformat(),
-                "date_today": today.isoformat(),
-                "freshness_days": (today - latest_date).days,
             }
 
     # --- 3. Variations ---

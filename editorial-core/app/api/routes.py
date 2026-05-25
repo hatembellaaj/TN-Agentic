@@ -80,8 +80,8 @@ def run_weather(
 
 
 class ExchangeRatesRunRequest(RunRequest):
-    """Body de /agents/exchange-rates/run, étendu avec require_fresh_data."""
-    require_fresh_data: bool = True
+    """Body de /agents/exchange-rates/run, étendu avec force."""
+    force: bool = False
 
 
 @router.post("/exchange-rates/run", response_model=dict[str, Any])
@@ -93,12 +93,13 @@ def run_exchange_rates(
     """
     Déclenche l'agent taux de change bout en bout (Sprint 2).
 
-    Appelé par cron horaire 08:30 → 17:30 L-V. L'agent SKIP silencieusement si
-    la BCT n'a pas encore publié les taux du jour, ou si un article du jour
-    existe déjà. La prochaine exécution du cron réessaiera.
+    Appelé par cron quotidien à 07:00 UTC (= 08:00 Tunis). Publie l'article
+    basé sur la cotation BCT la plus récente, même si elle date d'hier ou plus
+    ancien (la BCT met à jour vers 16h Tunis). Claude mentionne explicitement
+    la date de la cotation dans le titre et l'intro.
 
-    Pour FORCER une génération même sur des données vieilles (mode rattrapage
-    manuel), envoyer dans le body : `{"require_fresh_data": false}`.
+    Idempotence : si un article basé sur la même date de cotation BCT existe
+    déjà, l'agent skip. Pour forcer une régénération, envoyer `{"force": true}`.
     """
     payload = payload or ExchangeRatesRunRequest()
     exec_id = None
@@ -111,7 +112,7 @@ def run_exchange_rates(
     if payload.async_mode:
         new_id = exec_id or uuid.uuid4()
         trigger_scrape = payload.trigger_scrape
-        require_fresh = payload.require_fresh_data
+        force = payload.force
 
         def _run():
             from app.db import SessionLocal
@@ -121,7 +122,7 @@ def run_exchange_rates(
                     bg_session,
                     execution_id=new_id,
                     trigger_scrape=trigger_scrape,
-                    require_fresh_data=require_fresh,
+                    force=force,
                 )
 
         background_tasks.add_task(_run)
@@ -135,7 +136,7 @@ def run_exchange_rates(
         session,
         execution_id=exec_id,
         trigger_scrape=payload.trigger_scrape,
-        require_fresh_data=payload.require_fresh_data,
+        force=payload.force,
     )
     if result.get("status") == "error":
         raise HTTPException(500, result)

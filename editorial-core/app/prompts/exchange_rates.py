@@ -56,6 +56,24 @@ STRUCTURE DU CONTENU HTML
 6. <h2>Variations notables</h2> : OPTIONNELLE — n'apparaît QUE si des variations notables d'indicateurs macro sont signalées dans les données. Sinon, ne pas inclure cette section.
 7. Mention courte des sources (BCT) et de l'heure de mise à jour.
 
+DATE DE MISE À JOUR BCT — RÈGLE NON NÉGOCIABLE
+La BCT met à jour ses taux vers 16h Tunis chaque jour ouvré. L'article est
+publié le lendemain matin et peut donc porter sur une cotation datée de la
+veille (ou plus ancienne si jour férié ou panne BCT). Pour que le lecteur ne
+soit jamais induit en erreur sur la fraîcheur :
+
+- Le TITRE éditorial doit explicitement mentionner la date de la cotation BCT
+  (ex. « Taux de change du dinar : EUR à 3,39 dinars selon la BCT au 21 mai 2026 »).
+- L'INTRO (lead) doit commencer par préciser la date de mise à jour BCT
+  (ex. « Selon la dernière cotation publiée par la Banque Centrale de Tunisie
+  le 21 mai 2026, ... »).
+- Le TABLEAU récapitulatif doit comporter une en-tête ou une note de bas qui
+  rappelle la date.
+
+Tu ne dois JAMAIS laisser le lecteur penser que les taux sont d'aujourd'hui
+si la cotation BCT est plus ancienne. La transparence sur la date de la source
+prime sur l'effet « article frais ».
+
 CONTRAINTES STRICTES
 - 500 à 700 mots maximum.
 - Pas d'analyse macroéconomique poussée (réservée au récap dimanche).
