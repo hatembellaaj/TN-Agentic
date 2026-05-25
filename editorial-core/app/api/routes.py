@@ -79,18 +79,28 @@ def run_weather(
     return result
 
 
+class ExchangeRatesRunRequest(RunRequest):
+    """Body de /agents/exchange-rates/run, étendu avec require_fresh_data."""
+    require_fresh_data: bool = True
+
+
 @router.post("/exchange-rates/run", response_model=dict[str, Any])
 def run_exchange_rates(
     background_tasks: BackgroundTasks,
-    payload: RunRequest | None = None,
+    payload: ExchangeRatesRunRequest | None = None,
     session: Session = Depends(get_session),
 ):
     """
     Déclenche l'agent taux de change bout en bout (Sprint 2).
 
-    Workflow appelé par n8n (cron 9h45 L-V) ou manuellement via Swagger.
+    Appelé par cron horaire 08:30 → 17:30 L-V. L'agent SKIP silencieusement si
+    la BCT n'a pas encore publié les taux du jour, ou si un article du jour
+    existe déjà. La prochaine exécution du cron réessaiera.
+
+    Pour FORCER une génération même sur des données vieilles (mode rattrapage
+    manuel), envoyer dans le body : `{"require_fresh_data": false}`.
     """
-    payload = payload or RunRequest()
+    payload = payload or ExchangeRatesRunRequest()
     exec_id = None
     if payload.execution_id:
         try:
@@ -101,13 +111,17 @@ def run_exchange_rates(
     if payload.async_mode:
         new_id = exec_id or uuid.uuid4()
         trigger_scrape = payload.trigger_scrape
+        require_fresh = payload.require_fresh_data
 
         def _run():
             from app.db import SessionLocal
 
             with SessionLocal() as bg_session:
                 run_exchange_rates_agent(
-                    bg_session, execution_id=new_id, trigger_scrape=trigger_scrape
+                    bg_session,
+                    execution_id=new_id,
+                    trigger_scrape=trigger_scrape,
+                    require_fresh_data=require_fresh,
                 )
 
         background_tasks.add_task(_run)
@@ -118,7 +132,10 @@ def run_exchange_rates(
         }
 
     result = run_exchange_rates_agent(
-        session, execution_id=exec_id, trigger_scrape=payload.trigger_scrape
+        session,
+        execution_id=exec_id,
+        trigger_scrape=payload.trigger_scrape,
+        require_fresh_data=payload.require_fresh_data,
     )
     if result.get("status") == "error":
         raise HTTPException(500, result)

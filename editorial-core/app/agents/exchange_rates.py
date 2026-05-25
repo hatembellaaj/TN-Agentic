@@ -227,7 +227,17 @@ def run_exchange_rates_agent(
     *,
     execution_id: uuid.UUID | None = None,
     trigger_scrape: bool = True,
+    require_fresh_data: bool = True,
 ) -> dict[str, Any]:
+    """
+    Pipeline taux de change BCT.
+
+    :param require_fresh_data: si True (défaut), l'agent SKIP silencieusement quand :
+        - la date de la dernière cotation BCT n'est pas aujourd'hui (BCT pas encore
+          publiée → on attend la prochaine exécution du cron horaire) ;
+        - un article taux_change du jour est déjà en base (idempotence).
+        Mettre à False pour forcer une génération manuelle même sur des données vieilles.
+    """
     if execution_id is None:
         execution_id = uuid.uuid4()
 
@@ -268,6 +278,46 @@ def run_exchange_rates_agent(
         session, execution_id, "load_data", "success",
         message=f"{len(devises)} devises chargées (cotation du {latest_date})",
     )
+
+    # --- 2.5 Idempotence : on a déjà publié aujourd'hui ? ---
+    today = dt.date.today()
+    if require_fresh_data:
+        existing = session.scalar(
+            select(ArticleGenerated)
+            .where(
+                ArticleGenerated.theme == "taux_change",
+                ArticleGenerated.date_publication == today,
+                ArticleGenerated.langue == "fr",  # on prend FR comme référence
+            )
+            .limit(1)
+        )
+        if existing:
+            msg = f"Article taux_change du {today} déjà publié (id={existing.id}), aucune action."
+            _log_step(session, execution_id, "skip_already_published", "success", message=msg)
+            return {
+                "execution_id": str(execution_id),
+                "status": "skipped",
+                "reason": "already_published",
+                "existing_article_id": existing.id,
+                "date_today": today.isoformat(),
+            }
+
+        # --- 2.6 Fraîcheur : la BCT a-t-elle publié aujourd'hui ? ---
+        if latest_date < today:
+            msg = (
+                f"BCT n'a pas encore publié les taux du {today} "
+                f"(dernière cotation disponible : {latest_date}). "
+                "L'agent attend la prochaine exécution du cron."
+            )
+            _log_step(session, execution_id, "skip_stale_data", "success", message=msg)
+            return {
+                "execution_id": str(execution_id),
+                "status": "skipped",
+                "reason": "stale_data",
+                "latest_bct_date": latest_date.isoformat(),
+                "date_today": today.isoformat(),
+                "freshness_days": (today - latest_date).days,
+            }
 
     # --- 3. Variations ---
     variations = _compute_variations(session, latest_date)
