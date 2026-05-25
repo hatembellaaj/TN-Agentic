@@ -81,20 +81,26 @@ def _trigger_scraper(execution_id: uuid.UUID) -> dict[str, Any]:
 
 
 def _load_today_devises(session: Session) -> tuple[list[dict[str, Any]], dt.date | None]:
-    """Charge les cours les plus récents (1 ligne par devise)."""
-    # Pour chaque devise distincte, on prend la ligne avec la date_cotation max
+    """
+    Charge les cours les plus récents disponibles (1 ligne par devise).
+
+    Fenêtre de tolérance : 14 jours. La BCT ne publie pas le week-end ni les
+    jours fériés, et il peut y avoir des pannes ponctuelles. On prend toujours
+    la date la plus récente disponible dans cette fenêtre, même si elle est
+    de quelques jours en arrière. La date réelle est passée à Claude qui
+    référence explicitement « Taux du JJ/MM/AAAA » dans l'article.
+    """
     today = dt.date.today()
-    # On accepte aussi un jour de retard si la BCT n'a pas encore publié aujourd'hui
     rows = session.scalars(
         select(ExchangeRate)
-        .where(ExchangeRate.date_cotation >= today - dt.timedelta(days=3))
+        .where(ExchangeRate.date_cotation >= today - dt.timedelta(days=14))
         .order_by(desc(ExchangeRate.date_cotation))
     ).all()
 
     if not rows:
         return [], None
 
-    # Prend la date la plus récente
+    # Prend la date la plus récente parmi celles disponibles
     latest_date = max(r.date_cotation for r in rows)
     selected = [r for r in rows if r.date_cotation == latest_date]
 
@@ -400,10 +406,17 @@ def run_exchange_rates_agent(
     _log_step(session, execution_id, "telegram_notify", "success" if notif_ok else "error")
     _log_step(session, execution_id, "pipeline_done", "success", duree_ms=duree_total * 1000)
 
+    today = dt.date.today()
+    freshness_days = (today - latest_date).days
     return {
         "execution_id": str(execution_id),
         "status": "success",
         "date_cotation": latest_date.isoformat(),
+        "freshness_days": freshness_days,
+        "freshness_warning": (
+            None if freshness_days <= 1
+            else f"Données BCT vieilles de {freshness_days} jours (jour férié ou BCT non publié)."
+        ),
         "duree_secondes": duree_total,
         "modele_claude": claude.model,
         "publisher": publisher.backend_name,
