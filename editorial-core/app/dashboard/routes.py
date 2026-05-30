@@ -9,8 +9,11 @@ import uuid as uuid_mod
 from pathlib import Path
 from typing import Any
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -277,4 +280,77 @@ def exchange_rates_page(
             "by_devise_json": __import__("json").dumps(by_devise),
             "total_rows": len(rows),
         },
+    )
+
+
+@router.get("/exchange-rates/export.csv")
+def exchange_rates_export_csv(
+    session: Session = Depends(get_session),
+    devise: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+):
+    """
+    Export CSV de l'historique des cours, en respectant les mêmes filtres
+    (devise, date_from, date_to) que la page /dashboard/exchange-rates.
+
+    Format CSV (séparateur virgule, encodage UTF-8 avec BOM pour ouverture
+    directe dans Excel sans bug d'accents) :
+      date_cotation,devise_code,taux_moyen,unite_bct,source_type,timestamp_collecte
+    """
+    if devise == "ALL":
+        devise = None
+
+    today = dt.date.today()
+    df = dt.date.fromisoformat(date_from) if date_from else today - dt.timedelta(days=90)
+    dt_to = dt.date.fromisoformat(date_to) if date_to else today
+
+    stmt = (
+        select(ExchangeRate)
+        .where(ExchangeRate.date_cotation >= df)
+        .where(ExchangeRate.date_cotation <= dt_to)
+        .order_by(ExchangeRate.date_cotation, ExchangeRate.devise_code)
+    )
+    if devise:
+        stmt = stmt.where(ExchangeRate.devise_code == devise)
+
+    rows = session.scalars(stmt).all()
+
+    # Construction du CSV en mémoire (StringIO) — pas de fichier disque
+    buffer = io.StringIO()
+    # BOM UTF-8 pour qu'Excel reconnaisse l'encodage et n'affiche pas "Ã©" au lieu de "é"
+    buffer.write("﻿")
+    writer = csv.writer(buffer, delimiter=",", quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([
+        "date_cotation",
+        "devise_code",
+        "taux_moyen_tnd",
+        "unite_bct",
+        "valeur_brute_bct",
+        "source_type",
+        "timestamp_collecte",
+    ])
+    for r in rows:
+        raw = r.raw_data_json or {}
+        writer.writerow([
+            r.date_cotation.isoformat(),
+            r.devise_code,
+            f"{float(r.taux_moyen):.6f}" if r.taux_moyen is not None else "",
+            raw.get("unite_bct", ""),
+            raw.get("valeur_brute", ""),
+            r.source_type,
+            r.timestamp_collecte.isoformat() if r.timestamp_collecte else "",
+        ])
+
+    csv_data = buffer.getvalue()
+    buffer.close()
+
+    # Nom de fichier suggéré au navigateur
+    devise_label = devise or "ALL"
+    filename = f"bct_rates_{devise_label}_{df.isoformat()}_to_{dt_to.isoformat()}.csv"
+
+    return StreamingResponse(
+        iter([csv_data]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
