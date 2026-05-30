@@ -15,8 +15,9 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db import get_session
-from app.models import ArticleGenerated, ClaudeLog, ExecutionLog, NotificationLog
+from app.models import ArticleGenerated, ClaudeLog, ExchangeRate, ExecutionLog, NotificationLog
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -172,5 +173,108 @@ def execution_detail(
             "articles": articles,
             "notifications": notifications,
             "claude_calls": claude_calls,
+        },
+    )
+
+
+# ============================================================
+# Backfill historique BCT (UI)
+# ============================================================
+
+@router.get("/backfill", response_class=HTMLResponse)
+def backfill_form(request: Request, session: Session = Depends(get_session)):
+    """Formulaire de backfill : date_from + date_to + bouton."""
+    # Quelques stats actuelles pour informer l'utilisateur
+    stats = session.execute(
+        select(
+            func.min(ExchangeRate.date_cotation).label("oldest"),
+            func.max(ExchangeRate.date_cotation).label("newest"),
+            func.count(ExchangeRate.id).label("total"),
+            func.count(func.distinct(ExchangeRate.date_cotation)).label("dates"),
+        )
+    ).one()
+    backfill_count = session.scalar(
+        select(func.count(ExchangeRate.id)).where(ExchangeRate.source_type == "backfill_archive")
+    ) or 0
+    daily_count = session.scalar(
+        select(func.count(ExchangeRate.id)).where(ExchangeRate.source_type == "daily_scrape")
+    ) or 0
+    return templates.TemplateResponse(
+        "backfill.html",
+        {
+            "request": request,
+            "stats": {
+                "oldest": stats.oldest.isoformat() if stats.oldest else None,
+                "newest": stats.newest.isoformat() if stats.newest else None,
+                "total": stats.total,
+                "dates": stats.dates,
+                "backfill_count": backfill_count,
+                "daily_count": daily_count,
+            },
+            "scraper_url": settings.SCRAPER_BCT_URL,
+        },
+    )
+
+
+# ============================================================
+# Historique des cours par devise (UI + JSON pour Chart.js)
+# ============================================================
+
+@router.get("/exchange-rates", response_class=HTMLResponse)
+def exchange_rates_page(
+    request: Request,
+    session: Session = Depends(get_session),
+    devise: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+):
+    """Vue historique d'une devise (ou de toutes si devise non précisée)."""
+    # Liste des devises disponibles
+    devises_available = session.scalars(
+        select(ExchangeRate.devise_code).distinct().order_by(ExchangeRate.devise_code)
+    ).all()
+
+    if devise == "ALL":
+        devise = None
+
+    # Range par défaut : 90 derniers jours
+    today = dt.date.today()
+    df = dt.date.fromisoformat(date_from) if date_from else today - dt.timedelta(days=90)
+    dt_to = dt.date.fromisoformat(date_to) if date_to else today
+
+    # Charge les données
+    stmt = (
+        select(ExchangeRate)
+        .where(ExchangeRate.date_cotation >= df)
+        .where(ExchangeRate.date_cotation <= dt_to)
+        .order_by(ExchangeRate.date_cotation, ExchangeRate.devise_code)
+    )
+    if devise:
+        stmt = stmt.where(ExchangeRate.devise_code == devise)
+
+    rows = session.scalars(stmt).all()
+
+    # Forme adaptée à Chart.js : un dataset par devise
+    by_devise: dict[str, list[dict]] = {}
+    for r in rows:
+        by_devise.setdefault(r.devise_code, []).append(
+            {
+                "date": r.date_cotation.isoformat(),
+                "taux_moyen": float(r.taux_moyen) if r.taux_moyen else None,
+                "source_type": r.source_type,
+            }
+        )
+
+    return templates.TemplateResponse(
+        "exchange_rates.html",
+        {
+            "request": request,
+            "devises_available": devises_available,
+            "selected_devise": devise or "ALL",
+            "date_from": df.isoformat(),
+            "date_to": dt_to.isoformat(),
+            "rows": rows,
+            "by_devise_json": __import__("json").dumps(by_devise),
+            "total_rows": len(rows),
         },
     )

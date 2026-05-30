@@ -330,6 +330,108 @@ def _parse_ddmm_with_current_year(text: str, fallback_today: dt.date | None = No
 _BCT_MOD_CONTENT_CLASS_RE = re.compile(r"bct-mod-content-(\d+)")
 
 
+# ============================================================
+# PARSEUR cours_archiv.jsp — historique (backfill)
+# ============================================================
+
+# Capture une devise sur 3 lettres majuscules (DZD, EUR, USD, etc.)
+_DEVISE_CODE_RE = re.compile(r"\b([A-Z]{3})\b")
+
+# Liste des codes devises connus de la BCT pour limiter le bruit
+_KNOWN_DEVISE_CODES = {
+    "DZD", "SAR", "CAD", "DKK", "USD", "GBP", "JPY", "MAD", "NOK", "SEK",
+    "CHF", "KWD", "AED", "EUR", "LYD", "MRU", "BHD", "QAR", "CNY", "OMR",
+    "TRY", "RUB", "JOD", "ZAR",
+}
+
+
+def parse_archive_page(html: str) -> tuple[list[dict[str, Any]], dt.date | None]:
+    """
+    Parse la réponse HTML de cours_archiv.jsp pour une date donnée.
+
+    Structure observée :
+      - Un en-tête contenant "Journée du DD/MM/AAAA"
+      - Un tableau « cours moyens des devises cotées » (interbancaires) avec
+        20 devises : drapeau, nom, sigle, unité, valeur
+      - Un second tableau « cours moyens en dinar tunisien pour le change manuel »
+        (taux touriste) — on ignore pour le POC.
+
+    Renvoie (liste_devises, date_cotation).
+    """
+    soup = BeautifulSoup(html, "lxml")
+
+    # Date depuis "Journée du DD/MM/AAAA"
+    date_cotation: dt.date | None = None
+    page_text = soup.get_text(" ", strip=True)
+    m = re.search(r"Journ[ée]e du\s+(\d{1,2})/(\d{1,2})/(\d{4})", page_text)
+    if m:
+        try:
+            date_cotation = dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            date_cotation = None
+
+    # On parcourt tous les <tr> et on cherche ceux qui contiennent un code devise
+    # de la liste connue + une unité (int) + une valeur (décimal).
+    devises: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for tr in soup.find_all("tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 3:
+            continue
+        cells_text = [td.get_text(strip=True) for td in tds]
+
+        # Trouve un code devise connu dans une cellule
+        code: str | None = None
+        for txt in cells_text:
+            mcode = _DEVISE_CODE_RE.search(txt)
+            if mcode and mcode.group(1) in _KNOWN_DEVISE_CODES:
+                code = mcode.group(1)
+                break
+        if not code or code in seen:
+            continue
+
+        # Cherche unité (entier "petit") et valeur (décimal) parmi les cellules
+        unite: int | None = None
+        valeur: Decimal | None = None
+        for txt in cells_text:
+            if not txt:
+                continue
+            # Essai entier (1, 10, 100, 1000)
+            if unite is None:
+                try:
+                    candidate = int(txt.replace(" ", ""))
+                    if candidate in (1, 10, 100, 1000):
+                        unite = candidate
+                        continue
+                except ValueError:
+                    pass
+            # Essai décimal (valeur cotation)
+            if valeur is None:
+                val = _to_decimal_fr(txt)
+                if val is not None and val > 0 and val != Decimal(unite or 0):
+                    valeur = val
+
+        if unite is None or valeur is None or unite == 0:
+            continue
+
+        taux_par_1 = (valeur / Decimal(unite)).quantize(Decimal("0.000001"))
+        devises.append({
+            "code": code,
+            "unite": unite,
+            "valeur_brute": valeur,
+            "taux_moyen_pour_1": taux_par_1,
+            "raw_html": str(tr)[:500],
+        })
+        seen.add(code)
+
+    return devises, date_cotation
+
+
+# ============================================================
+# PARSEUR indicateurs.jsp — anciennement (Sprint 3)
+# ============================================================
+
 def parse_indicators_page(html: str) -> list[dict[str, Any]]:
     """
     Parse https://www.bct.gov.tn/bct/siteprod/indicateurs.jsp.

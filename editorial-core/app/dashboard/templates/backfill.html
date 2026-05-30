@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Backfill historique BCT — TN-Agentic{% endblock %}
+
+{% block content %}
+  <h2>Backfill historique BCT</h2>
+  <p style="color: var(--gray); max-width: 700px;">
+    Récupère l'historique des cours de change depuis <code>cours_archiv.jsp</code>
+    de la BCT entre deux dates. Les données sont insérées en base avec
+    <code>source_type = 'backfill_archive'</code> pour les distinguer du
+    scraping quotidien. <strong>Le scraping respecte un délai aléatoire
+    de 3 à 6 secondes</strong> entre chaque date pour éviter tout blocage
+    Cloudflare BCT. Compte environ <strong>5 secondes par jour ouvré</strong>
+    (~20 minutes pour 1 an).
+  </p>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Cotations en base</div>
+      <div class="value">{{ stats.total }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Jours distincts</div>
+      <div class="value">{{ stats.dates }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Daily scrape</div>
+      <div class="value" style="color: var(--success);">{{ stats.daily_count }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Backfill archive</div>
+      <div class="value" style="color: var(--primary);">{{ stats.backfill_count }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Plus ancienne</div>
+      <div class="value" style="font-size: 1rem;">{{ stats.oldest or '—' }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Plus récente</div>
+      <div class="value" style="font-size: 1rem;">{{ stats.newest or '—' }}</div>
+    </div>
+  </div>
+
+  <div class="filters" style="display: block;">
+    <h3 style="margin-top: 0;">Lancer un backfill</h3>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+      <label>Date de début
+        <input type="date" id="date_from" value="{{ stats.oldest or '' }}">
+      </label>
+      <label>Date de fin
+        <input type="date" id="date_to" value="">
+      </label>
+      <label>Délai min (s)
+        <input type="number" id="delay_min" value="3" min="1" max="60" step="0.5" style="width: 80px;">
+      </label>
+      <label>Délai max (s)
+        <input type="number" id="delay_max" value="6" min="1" max="120" step="0.5" style="width: 80px;">
+      </label>
+      <label style="flex-direction: row; align-items: center; gap: 0.5rem;">
+        <input type="checkbox" id="skip_weekends" checked>
+        Skip week-ends
+      </label>
+      <button id="run-btn" style="padding: 0.7rem 1.4rem; background: var(--primary); color: white; border: none; border-radius: 4px; font-size: 0.95rem; cursor: pointer;">
+        🚀 Lancer le backfill
+      </button>
+    </div>
+    <p style="margin-top: 0.8rem; font-size: 0.85rem; color: var(--gray);">
+      ⚠ Le backfill est <strong>synchrone</strong> : la page peut sembler figée plusieurs minutes
+      le temps que toutes les dates soient traitées. Ne ferme pas l'onglet pendant ce temps.
+    </p>
+  </div>
+
+  <div id="result" style="margin-top: 2rem;"></div>
+
+  <script>
+    document.getElementById('run-btn').addEventListener('click', async () => {
+      const df = document.getElementById('date_from').value;
+      const dt = document.getElementById('date_to').value;
+      const dmin = parseFloat(document.getElementById('delay_min').value);
+      const dmax = parseFloat(document.getElementById('delay_max').value);
+      const skipW = document.getElementById('skip_weekends').checked;
+
+      if (!df || !dt) {
+        alert('Renseigne les deux dates.');
+        return;
+      }
+      const days = Math.round((new Date(dt) - new Date(df)) / 86400000);
+      const eta = Math.round((days * (dmin + dmax) / 2) / 60);
+      if (!confirm(`Backfill de ${df} → ${dt} (${days} jours), durée estimée ~${eta} min. Confirmer ?`)) return;
+
+      const btn = document.getElementById('run-btn');
+      const resultDiv = document.getElementById('result');
+      btn.disabled = true;
+      btn.textContent = '⏳ Backfill en cours… (ne pas fermer)';
+      resultDiv.innerHTML = '<div class="empty-state">Backfill en cours, patience…<br><small>Tu peux suivre les insertions en live dans /dashboard/exchange-rates en rechargeant la page.</small></div>';
+
+      try {
+        const r = await fetch('/api/admin/backfill-exchange-rates', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            date_from: df,
+            date_to: dt,
+            delay_min_sec: dmin,
+            delay_max_sec: dmax,
+            skip_weekends: skipW,
+          }),
+        });
+        const data = await r.json();
+        resultDiv.innerHTML = `
+          <h3>Résultat</h3>
+          <div class="stats">
+            <div class="stat-card"><div class="label">Jours OK</div><div class="value" style="color: var(--success);">${data.days_ok || 0}</div></div>
+            <div class="stat-card"><div class="label">Skippés</div><div class="value">${data.days_skipped || 0}</div></div>
+            <div class="stat-card"><div class="label">Erreurs</div><div class="value" style="color: var(--error);">${data.days_with_errors || 0}</div></div>
+            <div class="stat-card"><div class="label">Cotations insérées</div><div class="value">${data.devises_inserees || 0}</div></div>
+            <div class="stat-card"><div class="label">Durée</div><div class="value">${data.duree_secondes || 0}s</div></div>
+          </div>
+          ${data.errors_detail && data.errors_detail.length ? `<details><summary>${data.errors_detail.length} erreurs (cliquer pour voir)</summary><pre>${JSON.stringify(data.errors_detail, null, 2)}</pre></details>` : ''}
+          <p><a href="/dashboard/exchange-rates">→ Voir l'historique des cours</a></p>
+        `;
+        btn.disabled = false;
+        btn.textContent = '🚀 Lancer le backfill';
+      } catch (e) {
+        resultDiv.innerHTML = `<div class="empty-state" style="color: var(--error);">Erreur : ${e.message}</div>`;
+        btn.disabled = false;
+        btn.textContent = '🚀 Lancer le backfill';
+      }
+    });
+  </script>
+{% endblock %}

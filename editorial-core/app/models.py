@@ -118,6 +118,9 @@ class ExchangeRate(Base):
     taux_moyen: Mapped[Decimal | None] = mapped_column(Numeric(15, 6))
     source_url: Mapped[str | None] = mapped_column(String(500))
     fiabilite: Mapped[str] = mapped_column(String(20), default="haute")
+    # Origine de la donnée : 'daily_scrape' (cron quotidien index.jsp),
+    # 'backfill_archive' (script de backfill via cours_archiv.jsp), 'manual'.
+    source_type: Mapped[str] = mapped_column(String(20), default="daily_scrape", nullable=False)
     raw_data_json: Mapped[dict | None] = mapped_column(JSONB)
     timestamp_collecte: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

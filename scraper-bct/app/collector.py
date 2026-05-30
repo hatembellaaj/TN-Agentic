@@ -12,10 +12,12 @@ from typing import Any
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+import random
+
 from app.bct_client import BctClient
 from app.config import settings
 from app.models import BctMacroIndicator, ExchangeRate, ExecutionLog
-from app.parser import parse_bct_index, parse_indicators_page
+from app.parser import parse_archive_page, parse_bct_index, parse_indicators_page
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +257,164 @@ def collect_bct_indicators_detail(
         "sections_total": len(rows),
         "duree_ms": duree_ms,
         "status": "success" if inserted > 0 else "error",
+    }
+
+
+# ============================================================
+# Backfill historique via cours_archiv.jsp (Sprint 2 — feature mai 2026)
+# ============================================================
+
+def backfill_archive(
+    session: Session,
+    date_from: dt.date,
+    date_to: dt.date,
+    *,
+    delay_min_sec: float = 3.0,
+    delay_max_sec: float = 6.0,
+    skip_weekends: bool = True,
+    execution_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    """
+    Parcourt l'historique BCT entre `date_from` et `date_to` (inclus), récupère
+    les cours quotidiens depuis cours_archiv.jsp, et insère en base avec
+    source_type='backfill_archive'.
+
+    Stratégie anti-ban :
+    - Une seule session HTTP réutilisée (JSESSIONID stable, comportement
+      « navigateur humain »).
+    - Délai aléatoire entre chaque requête (3 à 6 secondes par défaut), jitter
+      pour éviter une signature trop régulière.
+    - Skip des week-ends (BCT ne publie pas, c'est du gaspillage de requêtes).
+    - Backoff exponentiel intégré au httpx via tenacity (déjà dans
+      BctClient.fetch_archive).
+    """
+    if execution_id is None:
+        execution_id = uuid.uuid4()
+
+    if date_from > date_to:
+        return {
+            "execution_id": str(execution_id),
+            "status": "error",
+            "message": "date_from doit être <= date_to",
+        }
+
+    bct = BctClient()
+    inserted = skipped = errors = 0
+    devises_total = 0
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    started = time.perf_counter()
+    errors_detail: list[dict[str, str]] = []
+
+    current = date_from
+    try:
+        client = bct.open_archive_session()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Echec ouverture session BCT")
+        return {
+            "execution_id": str(execution_id),
+            "status": "error",
+            "message": f"Echec ouverture session BCT : {exc}",
+        }
+
+    try:
+        while current <= date_to:
+            # Skip week-ends (samedi=5, dimanche=6)
+            if skip_weekends and current.weekday() >= 5:
+                skipped += 1
+                current += dt.timedelta(days=1)
+                continue
+
+            date_iso = current.isoformat()
+            try:
+                html = bct.fetch_archive(client, date_iso)
+                devises, parsed_date = parse_archive_page(html)
+                if not devises:
+                    logger.warning("Pas de devises trouvées pour %s (date BCT : %s)", date_iso, parsed_date)
+                    errors += 1
+                    errors_detail.append({"date": date_iso, "error": "no devises parsed"})
+                else:
+                    effective_date = parsed_date or current
+                    for d in devises:
+                        taux = d["taux_moyen_pour_1"]
+                        stmt = pg_insert(ExchangeRate).values(
+                            devise_code=d["code"],
+                            date_cotation=effective_date,
+                            taux_achat=taux,
+                            taux_vente=taux,
+                            taux_moyen=taux,
+                            source_url=BctClient.COURS_ARCHIV_URL,
+                            fiabilite="haute",
+                            source_type="backfill_archive",
+                            raw_data_json={
+                                "unite_bct": d["unite"],
+                                "valeur_brute": str(d["valeur_brute"]),
+                                "queried_date": date_iso,
+                            },
+                            timestamp_collecte=now_utc,
+                        )
+                        stmt = stmt.on_conflict_do_update(
+                            constraint="uq_rate_devise_date",
+                            set_={
+                                "taux_achat": stmt.excluded.taux_achat,
+                                "taux_vente": stmt.excluded.taux_vente,
+                                "taux_moyen": stmt.excluded.taux_moyen,
+                                "raw_data_json": stmt.excluded.raw_data_json,
+                                "source_type": "backfill_archive",
+                                "timestamp_collecte": now_utc,
+                            },
+                        )
+                        session.execute(stmt)
+                        devises_total += 1
+                    inserted += 1
+                    session.commit()
+                    logger.info("Backfill OK pour %s (%s devises)", effective_date, len(devises))
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Echec backfill date %s", date_iso)
+                errors += 1
+                errors_detail.append({"date": date_iso, "error": str(exc)[:200]})
+
+            # Délai anti-ban avant la prochaine date
+            current += dt.timedelta(days=1)
+            if current <= date_to:
+                delay = random.uniform(delay_min_sec, delay_max_sec)
+                time.sleep(delay)
+    finally:
+        client.close()
+
+    duree_ms = int((time.perf_counter() - started) * 1000)
+
+    session.add(
+        ExecutionLog(
+            execution_id=execution_id,
+            agent_name="scraper-bct",
+            agent_step="backfill_archive",
+            status="success" if inserted > 0 and errors == 0 else ("partial" if inserted > 0 else "error"),
+            message=f"{inserted} jours OK, {skipped} skipped, {errors} erreurs, {devises_total} insertions",
+            duree_ms=duree_ms,
+            payload_json={
+                "date_from": date_from.isoformat(),
+                "date_to": date_to.isoformat(),
+                "inserted": inserted,
+                "skipped": skipped,
+                "errors": errors,
+                "devises_total": devises_total,
+                "errors_detail": errors_detail[:50],
+            },
+        )
+    )
+    session.commit()
+
+    return {
+        "execution_id": str(execution_id),
+        "status": "success" if errors == 0 else "partial",
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "days_ok": inserted,
+        "days_skipped": skipped,
+        "days_with_errors": errors,
+        "devises_inserees": devises_total,
+        "duree_secondes": duree_ms // 1000,
+        "errors_detail": errors_detail[:20],
     }
 
 

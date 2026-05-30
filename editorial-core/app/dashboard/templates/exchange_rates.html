@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Historique des cours BCT — TN-Agentic{% endblock %}
+
+{% block content %}
+  <h2>Historique des cours de change BCT</h2>
+
+  <form class="filters" method="get" action="/dashboard/exchange-rates">
+    <label>Devise
+      <select name="devise">
+        <option value="ALL" {% if selected_devise == "ALL" %}selected{% endif %}>Toutes les devises</option>
+        {% for d in devises_available %}
+          <option value="{{ d }}" {% if selected_devise == d %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Du
+      <input type="date" name="date_from" value="{{ date_from }}">
+    </label>
+    <label>Au
+      <input type="date" name="date_to" value="{{ date_to }}">
+    </label>
+    <button type="submit">Afficher</button>
+    <a href="/dashboard/backfill" style="margin-left: auto; color: var(--primary); align-self: center;">→ Backfill historique</a>
+  </form>
+
+  <div style="background: white; padding: 1rem; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 1.5rem;">
+    <p style="margin: 0; color: var(--gray); font-size: 0.9rem;">
+      <strong>{{ total_rows }}</strong> cotations affichées
+      {% if selected_devise != "ALL" %}pour <strong>{{ selected_devise }}</strong>{% endif %}
+      du {{ date_from }} au {{ date_to }}.
+    </p>
+  </div>
+
+  <div style="background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 1.5rem;">
+    <canvas id="chart" style="max-height: 400px;"></canvas>
+  </div>
+
+  {% if rows %}
+    <table>
+      <thead>
+        <tr>
+          <th>Date cotation</th>
+          <th>Devise</th>
+          <th>Taux moyen (TND)</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows[:500] %}
+          <tr>
+            <td>{{ r.date_cotation }}</td>
+            <td><strong>{{ r.devise_code }}</strong></td>
+            <td style="font-variant-numeric: tabular-nums;">{{ "%.4f"|format(r.taux_moyen|float) if r.taux_moyen else '—' }}</td>
+            <td>
+              {% if r.source_type == 'backfill_archive' %}
+                <span class="badge badge-info">backfill</span>
+              {% elif r.source_type == 'daily_scrape' %}
+                <span class="badge badge-success">daily</span>
+              {% else %}
+                <span class="badge badge-gray">{{ r.source_type }}</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if total_rows > 500 %}
+      <p style="color: var(--gray); margin-top: 1rem;">… (500 premières lignes affichées sur {{ total_rows }} au total)</p>
+    {% endif %}
+  {% else %}
+    <div class="empty-state">
+      Aucune cotation trouvée. Lance un backfill ou attends que le cron quotidien remplisse la base.
+    </div>
+  {% endif %}
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+    const dataByDevise = {{ by_devise_json | safe }};
+    const ctx = document.getElementById('chart').getContext('2d');
+
+    // Palette de couleurs distinctes pour différencier les devises
+    const palette = [
+      '#2c5282', '#c53030', '#2f855a', '#d69e2e', '#6b46c1',
+      '#dd6b20', '#319795', '#b83280', '#718096', '#1a365d',
+      '#742a2a', '#22543d', '#744210', '#44337a', '#7b341e',
+      '#234e52', '#702459', '#2d3748', '#5b21b6', '#9b2c2c',
+    ];
+
+    const datasets = [];
+    let colorIdx = 0;
+    for (const [devise, points] of Object.entries(dataByDevise)) {
+      datasets.push({
+        label: devise,
+        data: points.map(p => ({x: p.date, y: p.taux_moyen})),
+        borderColor: palette[colorIdx % palette.length],
+        backgroundColor: palette[colorIdx % palette.length] + '20',
+        tension: 0.2,
+        pointRadius: 1.5,
+        pointHoverRadius: 4,
+        borderWidth: 2,
+      });
+      colorIdx++;
+    }
+
+    if (datasets.length > 0) {
+      new Chart(ctx, {
+        type: 'line',
+        data: {datasets},
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {mode: 'index', intersect: false},
+          scales: {
+            x: {type: 'category', ticks: {maxTicksLimit: 12}, title: {display: true, text: 'Date'}},
+            y: {title: {display: true, text: 'TND pour 1 unité de devise'}},
+          },
+          plugins: {
+            legend: {position: 'bottom', labels: {boxWidth: 14}},
+            tooltip: {callbacks: {label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)} TND`}},
+          },
+        },
+      });
+    }
+  </script>
+{% endblock %}

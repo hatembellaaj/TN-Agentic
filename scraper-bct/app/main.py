@@ -8,7 +8,14 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.collector import collect_all_bct, collect_bct, collect_bct_indicators_detail
+import datetime as dt
+
+from app.collector import (
+    backfill_archive,
+    collect_all_bct,
+    collect_bct,
+    collect_bct_indicators_detail,
+)
 from app.config import settings
 from app.db import get_session
 
@@ -108,6 +115,81 @@ def collect_all(
         except ValueError as exc:
             raise HTTPException(400, "execution_id doit être un UUID") from exc
     return collect_all_bct(session, execution_id=execution_id)
+
+
+class BackfillRequest(BaseModel):
+    date_from: str  # YYYY-MM-DD
+    date_to: str    # YYYY-MM-DD
+    delay_min_sec: float = 3.0
+    delay_max_sec: float = 6.0
+    skip_weekends: bool = True
+
+
+@app.post("/backfill", tags=["bct"])
+def backfill(payload: BackfillRequest, session: Session = Depends(get_session)) -> dict:
+    """
+    Backfill historique BCT entre deux dates (incluses).
+
+    Pour 260 jours ouvrés (~1 an) avec délais 3-6 sec, prévoir ~20 min.
+    L'endpoint est synchrone : la réponse arrive à la fin. Pour les gros
+    backfills (>3 mois), prévoir un timeout côté client ou lancer en background.
+    """
+    try:
+        df = dt.date.fromisoformat(payload.date_from)
+        dt_ = dt.date.fromisoformat(payload.date_to)
+    except ValueError as exc:
+        raise HTTPException(400, f"Date invalide : {exc}") from exc
+    if (dt_ - df).days > 400:
+        raise HTTPException(400, "Plage > 400 jours. Découper en plusieurs lots.")
+
+    result = backfill_archive(
+        session,
+        date_from=df,
+        date_to=dt_,
+        delay_min_sec=payload.delay_min_sec,
+        delay_max_sec=payload.delay_max_sec,
+        skip_weekends=payload.skip_weekends,
+    )
+    return result
+
+
+@app.get("/preview-archive", tags=["debug"])
+def preview_archive(date: str) -> dict:
+    """
+    Aperçu : récupère + parse cours_archiv.jsp pour une date donnée,
+    SANS écrire en base. Test rapide du parser.
+    """
+    from app.bct_client import BctClient
+    from app.parser import parse_archive_page
+
+    try:
+        date_obj = dt.date.fromisoformat(date)
+    except ValueError as exc:
+        raise HTTPException(400, f"Date invalide : {exc}") from exc
+
+    bct = BctClient()
+    client = bct.open_archive_session()
+    try:
+        html = bct.fetch_archive(client, date_obj.isoformat())
+    finally:
+        client.close()
+
+    devises, parsed_date = parse_archive_page(html)
+    return {
+        "queried_date": date_obj.isoformat(),
+        "parsed_date": parsed_date.isoformat() if parsed_date else None,
+        "devises_count": len(devises),
+        "devises": [
+            {
+                "code": d["code"],
+                "unite": d["unite"],
+                "valeur_brute": str(d["valeur_brute"]),
+                "taux_moyen_pour_1": str(d["taux_moyen_pour_1"]),
+            }
+            for d in devises
+        ],
+        "html_length": len(html),
+    }
 
 
 @app.get("/preview", tags=["debug"])

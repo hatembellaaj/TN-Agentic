@@ -4,9 +4,12 @@ Préfixés /api/admin/ — utiles pendant la phase de POC.
 """
 from __future__ import annotations
 
+import datetime as dt
 from typing import Literal
 
-from fastapi import APIRouter
+import httpx
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from app.config import settings
 from app.publishers import get_publisher
@@ -29,6 +32,46 @@ def publisher_status() -> dict:
         "articles_output_dir": settings.ARTICLES_OUTPUT_DIR,
         "public_base_url": settings.PUBLIC_BASE_URL,
     }
+
+
+class BackfillTriggerRequest(BaseModel):
+    date_from: str
+    date_to: str
+    delay_min_sec: float = 3.0
+    delay_max_sec: float = 6.0
+    skip_weekends: bool = True
+
+
+@admin_router.post("/backfill-exchange-rates")
+def backfill_exchange_rates(payload: BackfillTriggerRequest) -> dict:
+    """
+    Proxy vers scraper-bct/backfill — déclenche le backfill historique
+    via UI dashboard (un seul domaine externe).
+
+    Attention : appel SYNCHRONE qui peut durer plusieurs minutes selon la plage
+    (compte ~5 sec/jour ouvré). Pour une plage de 1 an : ~20 min. Le timeout
+    httpx est mis à 7200 sec (2h) pour couvrir les gros backfills.
+    """
+    try:
+        dt.date.fromisoformat(payload.date_from)
+        dt.date.fromisoformat(payload.date_to)
+    except ValueError as exc:
+        raise HTTPException(400, f"Date invalide : {exc}") from exc
+
+    url = f"{settings.SCRAPER_BCT_URL.rstrip('/')}/backfill"
+    try:
+        with httpx.Client(timeout=7200.0) as client:
+            r = client.post(url, json=payload.model_dump())
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as exc:
+        return {
+            "status": "error",
+            "http_status": exc.response.status_code,
+            "body": exc.response.text[:500],
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "message": str(exc)}
 
 
 @admin_router.post("/wordpress-test")
