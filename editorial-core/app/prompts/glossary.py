@@ -55,6 +55,14 @@ Agrégat composite (rapprochement éditorial) :
 Inflation :
 • Taux d'inflation — Publié par l'INS (Institut National de la Statistique), pas directement par la BCT. À suivre conjointement avec le taux directeur pour comprendre l'orientation de la politique monétaire.
 
+Énergie (pour les articles comparatifs mensuels du cycle énergie) :
+• GlobalPetrolPrices — Source mondiale de référence pour les prix énergie. Licence Creative Commons CC-BY-NC-ND : la citation explicite de la source est OBLIGATOIRE dans chaque article.
+• Gaz de ville / gaz naturel réseau — Gaz distribué par la STEG via canalisations, ne pas confondre avec le GPL (gaz de pétrole liquéfié) en bouteille. À PRÉCISER systématiquement pour éviter la confusion lecteur.
+• STEG — Société Tunisienne de l'Électricité et du Gaz, opérateur historique.
+• ANME — Agence Nationale pour la Maîtrise de l'Énergie, source officielle des données énergétiques tunisiennes.
+• Prix régulés — En Tunisie comme en Algérie, les prix carburants sont fixés par l'État (subventionnés), d'où une faible variation mois après mois. Au Maroc, prix libéralisés. En Libye, subventions massives.
+• kWh, par_litre — Unités standard pour comparer ; toujours indiquer en USD et en TND converti.
+
 CONSEILS DE RÉDACTION
 - À la PREMIÈRE occurrence, utilise le libellé complet suivi de l'abréviation : « Taux Moyen du Marché Monétaire (TMM) ». Ensuite, l'abréviation seule suffit.
 - Pour le grand public, préfère « réserves en devises » à « avoirs nets en devises ».

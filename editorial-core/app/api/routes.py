@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.agents.energy_carburant import run_energy_carburant_agent
 from app.agents.exchange_rates import run_exchange_rates_agent
 from app.agents.saturday_billets import run_saturday_agent
 from app.agents.sunday_recap import run_sunday_agent
@@ -195,6 +196,46 @@ def run_sunday(
         execution_id=exec_id,
         trigger_scrape=payload.trigger_scrape,
         model_override=payload.model_override,
+    )
+    if result.get("status") == "error":
+        raise HTTPException(500, result)
+    return result
+
+
+# ============================================================
+# Cycle énergie (Phase 1 : carburant)
+# ============================================================
+
+class EnergyRunRequest(RunRequest):
+    """Body de /agents/energy/<theme>/run, étendu avec force."""
+    force: bool = False
+
+
+@router.post("/energy/carburant/run", response_model=dict[str, Any])
+def run_energy_carburant(
+    background_tasks: BackgroundTasks,
+    payload: EnergyRunRequest | None = None,
+    session: Session = Depends(get_session),
+):
+    """
+    Déclenche l'agent énergie carburant (semaine 1 du cycle mensuel énergie).
+
+    Cron prévu : premier lundi du mois à 09:00 UTC.
+    Idempotence : si un article énergie_carburant a déjà été publié ce mois-ci,
+    l'agent skip. Pour forcer une régénération : {"force": true}.
+    """
+    payload = payload or EnergyRunRequest()
+    exec_id = None
+    if payload.execution_id:
+        try:
+            exec_id = uuid.UUID(payload.execution_id)
+        except ValueError as exc:
+            raise HTTPException(400, "execution_id doit être un UUID") from exc
+    result = run_energy_carburant_agent(
+        session,
+        execution_id=exec_id,
+        trigger_scrape=payload.trigger_scrape,
+        force=payload.force,
     )
     if result.get("status") == "error":
         raise HTTPException(500, result)

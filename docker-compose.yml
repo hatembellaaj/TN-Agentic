@@ -76,6 +76,29 @@ services:
       retries: 3
 
   # ----------------------------------------------------------
+  # scraper-energy : collecte GlobalPetrolPrices (cycle énergie)
+  # ----------------------------------------------------------
+  scraper-energy:
+    build:
+      context: ./scraper-energy
+      dockerfile: Dockerfile
+    container_name: tn-scraper-energy
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tn-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ----------------------------------------------------------
   # editorial-core : Claude + Publisher + Telegram + Dashboard
   # ----------------------------------------------------------
   editorial-core:
@@ -147,6 +170,7 @@ services:
       - editorial-core
       - scraper-weather
       - scraper-bct
+      - scraper-energy
       - n8n
     networks:
       - tn-net

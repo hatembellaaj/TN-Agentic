@@ -256,6 +256,57 @@ class ExecutionLog(Base):
 
 
 # ============================================================
+# Énergie (Phase 1 mai 2026) : historisation des prix
+# ============================================================
+
+class EnergyPrice(Base):
+    __tablename__ = "energy_prices"
+    __table_args__ = (
+        Index("ix_energy_prices_series", "energy_type", "pays_code", "date_collecte"),
+        Index("ix_energy_prices_compare", "energy_type", "date_collecte"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    energy_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    pays_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    pays_nom: Mapped[str] = mapped_column(String(100), nullable=False)
+    prix_usd: Mapped[Decimal] = mapped_column(Numeric(15, 6), nullable=False)
+    prix_tnd: Mapped[Decimal | None] = mapped_column(Numeric(15, 6))
+    unite: Mapped[str] = mapped_column(String(20), nullable=False)
+    taux_usd_tnd_utilise: Mapped[Decimal | None] = mapped_column(Numeric(15, 6))
+    date_donnee_source: Mapped[dt.date | None] = mapped_column(Date)
+    date_collecte: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), default="GlobalPetrolPrices")
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    fiabilite: Mapped[str] = mapped_column(String(20), default="haute")
+    raw_data: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class EnergyWorldStats(Base):
+    __tablename__ = "energy_world_stats"
+    __table_args__ = (
+        Index("ix_energy_world_stats_type_date", "energy_type", "date_collecte"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    energy_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    moyenne_mondiale_usd: Mapped[Decimal | None] = mapped_column(Numeric(15, 6))
+    rang_tunisie: Mapped[int | None] = mapped_column(Integer)
+    nombre_pays_classement: Mapped[int | None] = mapped_column(Integer)
+    pays_moins_cher_code: Mapped[str | None] = mapped_column(String(3))
+    pays_moins_cher_nom: Mapped[str | None] = mapped_column(String(100))
+    pays_moins_cher_prix_usd: Mapped[Decimal | None] = mapped_column(Numeric(15, 6))
+    pays_plus_cher_code: Mapped[str | None] = mapped_column(String(3))
+    pays_plus_cher_nom: Mapped[str | None] = mapped_column(String(100))
+    pays_plus_cher_prix_usd: Mapped[Decimal | None] = mapped_column(Numeric(15, 6))
+    date_donnee_source: Mapped[dt.date | None] = mapped_column(Date)
+    date_collecte: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), default="GlobalPetrolPrices")
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    raw_data: Mapped[dict | None] = mapped_column(JSONB)
+
+
+# ============================================================
 # 7.10 notifications_log
 # ============================================================
 class NotificationLog(Base):
