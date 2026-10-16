@@ -4,6 +4,7 @@
 # ============================================================
 
 .PHONY: help build up down restart logs ps init run-weather shell-core shell-scraper db-shell \
+        create-admin create-editor users gen-secrets \
         migrate seed reset clean lint test status
 
 help: ## Affiche cette aide
@@ -56,6 +57,7 @@ run-weather: ## Déclenche l'agent météo manuellement (synchrone)
 	PORT=$${PORT:-18090}; \
 	echo "→ POST http://localhost:$$PORT/api/agents/weather/run" ; \
 	curl -s -X POST http://localhost:$$PORT/api/agents/weather/run \
+	  -H "X-API-Key: $$(grep '^N8N_SERVICE_API_KEY=' .env | cut -d= -f2-)" \
 	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
 
 run-rates: ## Déclenche l'agent taux de change BCT manuellement (synchrone)
@@ -63,23 +65,25 @@ run-rates: ## Déclenche l'agent taux de change BCT manuellement (synchrone)
 	PORT=$${PORT:-18090}; \
 	echo "→ POST http://localhost:$$PORT/api/agents/exchange-rates/run" ; \
 	curl -s -X POST http://localhost:$$PORT/api/agents/exchange-rates/run \
+	  -H "X-API-Key: $$(grep '^N8N_SERVICE_API_KEY=' .env | cut -d= -f2-)" \
 	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
 
 preview-bct: ## Aperçu sans écriture base : voir ce que le parser BCT extrait (index.jsp)
 	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
 	PORT=$${PORT:-18090}; \
-	curl -s http://localhost:$$PORT/scraper-bct/preview | python3 -m json.tool
+	docker compose exec -T editorial-core curl -s http://scraper-bct:8002/preview | python3 -m json.tool
 
 preview-indicators: ## Aperçu sans écriture base : indicateurs.jsp (11 sections)
 	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
 	PORT=$${PORT:-18090}; \
-	curl -s http://localhost:$$PORT/scraper-bct/preview-indicators | python3 -m json.tool
+	docker compose exec -T editorial-core curl -s http://scraper-bct:8002/preview-indicators | python3 -m json.tool
 
 run-saturday: ## Déclenche l'agent samedi (billets & monnaies en circulation)
 	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
 	PORT=$${PORT:-18090}; \
 	echo "→ POST http://localhost:$$PORT/api/agents/saturday/run" ; \
 	curl -s -X POST http://localhost:$$PORT/api/agents/saturday/run \
+	  -H "X-API-Key: $$(grep '^N8N_SERVICE_API_KEY=' .env | cut -d= -f2-)" \
 	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
 
 run-sunday: ## Déclenche l'agent dimanche (récap économique hebdomadaire)
@@ -87,16 +91,33 @@ run-sunday: ## Déclenche l'agent dimanche (récap économique hebdomadaire)
 	PORT=$${PORT:-18090}; \
 	echo "→ POST http://localhost:$$PORT/api/agents/sunday/run" ; \
 	curl -s -X POST http://localhost:$$PORT/api/agents/sunday/run \
+	  -H "X-API-Key: $$(grep '^N8N_SERVICE_API_KEY=' .env | cut -d= -f2-)" \
 	  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
 
 collect-all-bct: ## Collecte index.jsp + indicateurs.jsp en un seul appel (en base)
 	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
 	PORT=$${PORT:-18090}; \
-	curl -s -X POST http://localhost:$$PORT/scraper-bct/collect-all | python3 -m json.tool
+	docker compose exec -T editorial-core curl -s -X POST http://scraper-bct:8002/collect-all | python3 -m json.tool
 
 # ----------------------------------------------------------
 # Accès / debug
 # ----------------------------------------------------------
+# ----------------------------------------------------------
+# Authentification
+# ----------------------------------------------------------
+create-admin: ## Crée un compte admin : make create-admin LOGIN=hatem
+	docker compose exec editorial-core python -m app.auth.cli create-user $(LOGIN) --role admin
+
+create-editor: ## Crée un compte éditeur : make create-editor LOGIN=journaliste1
+	docker compose exec editorial-core python -m app.auth.cli create-user $(LOGIN) --role editor
+
+users: ## Liste les comptes
+	docker compose exec -T editorial-core python -m app.auth.cli list
+
+gen-secrets: ## Génère JWT_SECRET_KEY et N8N_SERVICE_API_KEY à coller dans .env
+	@echo "JWT_SECRET_KEY=$$(openssl rand -hex 32)"
+	@echo "N8N_SERVICE_API_KEY=$$(openssl rand -hex 32)"
+
 shell-core: ## Shell bash dans editorial-core
 	docker compose exec editorial-core bash
 
