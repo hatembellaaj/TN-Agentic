@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Connexion — TN-Agentic{% endblock %}
+{% block content %}
+<div class="login-card">
+  <h2>Connexion</h2>
+  {% if error %}<div class="login-error" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/dashboard/login" autocomplete="on">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label for="username">Identifiant</label>
+    <input id="username" name="username" type="text" required autofocus
+           autocomplete="username" value="{{ username or '' }}">
+    <label for="password">Mot de passe</label>
+    <input id="password" name="password" type="password" required autocomplete="current-password">
+    <button type="submit">Se connecter</button>
+  </form>
+</div>
+{% endblock %}

@@ -42,6 +42,33 @@
       font-size: 0.95rem;
     }
     header nav a:hover { opacity: 1; text-decoration: underline; }
+    header nav { display: flex; align-items: center; }
+    .user-chip { margin-left: 1.5rem; font-size: 0.85rem; opacity: 0.9; }
+    .logout-form { display: inline; margin-left: 0.8rem; }
+    .logout-form button {
+      background: transparent; color: white; border: 1px solid rgba(255,255,255,0.6);
+      border-radius: 4px; padding: 0.25rem 0.7rem; cursor: pointer; font-size: 0.85rem;
+    }
+    .logout-form button:hover { background: rgba(255,255,255,0.15); }
+    .login-card {
+      max-width: 380px; margin: 4rem auto; background: white; padding: 2rem;
+      border-radius: 8px; border: 1px solid var(--border);
+    }
+    .login-card h2 { margin-top: 0; color: var(--primary); font-size: 1.3rem; }
+    .login-card label { display: block; font-size: 0.85rem; color: var(--gray); margin-top: 1rem; }
+    .login-card input {
+      width: 100%; padding: 0.55rem 0.7rem; border: 1px solid var(--border);
+      border-radius: 4px; font-size: 0.95rem; margin-top: 0.25rem;
+    }
+    .login-card button {
+      width: 100%; margin-top: 1.5rem; padding: 0.6rem; background: var(--primary);
+      color: white; border: none; border-radius: 4px; font-size: 0.95rem; cursor: pointer;
+    }
+    .login-card button:hover { background: #1a365d; }
+    .login-error {
+      background: #fed7d7; color: var(--error); padding: 0.6rem 0.8rem;
+      border-radius: 4px; font-size: 0.9rem; margin-top: 1rem;
+    }
     main { max-width: 1400px; margin: 2rem auto; padding: 0 2rem; }
     .stats {
       display: grid;
@@ -179,13 +206,20 @@
 <body>
   <header>
     <h1>🤖 TN-Agentic — Dashboard</h1>
+    {% set principal = request.state.principal if request.state.principal is defined else none %}
+    {% if principal %}
     <nav>
       <a href="/dashboard/">Articles</a>
       <a href="/dashboard/exchange-rates">Cours BCT</a>
-      <a href="/dashboard/backfill">Backfill</a>
+      {% if principal.is_admin %}<a href="/dashboard/backfill">Backfill</a>{% endif %}
       <a href="/dashboard/executions">Exécutions</a>
       <a href="/api/docs">API (Swagger)</a>
+      <span class="user-chip">👤 {{ principal.username }} <small>({{ principal.role }})</small></span>
+      <form method="post" action="/dashboard/logout" class="logout-form">
+        <button type="submit">Déconnexion</button>
+      </form>
     </nav>
+    {% endif %}
   </header>
   <main>
     {% block content %}{% endblock %}

@@ -324,3 +324,21 @@ class NotificationLog(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     response_telegram_api: Mapped[dict | None] = mapped_column(JSONB)
+
+
+# ============================================================
+# Authentification : utilisateurs du dashboard / de l'API
+# ============================================================
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(255))
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # "admin" : tout (dont /api/admin, backfill, gestion des comptes) ; "editor" : lecture + agents
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="editor")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Incrémenté pour révoquer tous les JWT déjà émis (changement de mdp, désactivation…)
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_login_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))

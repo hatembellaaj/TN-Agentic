@@ -33,7 +33,16 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"trigger_scrape\": true,\n  \"async_mode\": false\n}"
+        "jsonBody": "={\n  \"trigger_scrape\": true,\n  \"async_mode\": false\n}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.TN_SERVICE_API_KEY }}"
+            }
+          ]
+        }
       },
       "id": "run-weather-agent",
       "name": "Run agent météo",

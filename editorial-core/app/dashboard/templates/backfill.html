@@ -106,6 +106,8 @@
             skip_weekends: skipW,
           }),
         });
+        if (r.status === 401) { window.location = '/dashboard/login?next=/dashboard/backfill'; return; }
+        if (r.status === 403) { resultDiv.innerHTML = '<div class="empty-state">Accès réservé aux administrateurs.</div>'; return; }
         const data = await r.json();
         resultDiv.innerHTML = `
           <h3>Résultat</h3>

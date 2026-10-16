@@ -1,6 +1,7 @@
 """Configuration via variables d'environnement."""
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,6 +48,33 @@ class Settings(BaseSettings):
     # Scrapers internes
     SCRAPER_WEATHER_URL: str = "http://scraper-weather:8001"
     SCRAPER_BCT_URL: str = "http://scraper-bct:8002"
+
+    # Authentification (dashboard + API)
+    JWT_SECRET_KEY: str                      # obligatoire : `openssl rand -hex 32`
+    JWT_ISSUER: str = "tn-agentic"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60     # jetons Bearer (Swagger / API)
+    SESSION_EXPIRE_MINUTES: int = 480         # cookie de session du dashboard (8 h)
+    COOKIE_SECURE: bool = False               # passer à true dès que HTTPS est en place
+    LOGIN_MAX_ATTEMPTS: int = 5
+    LOGIN_WINDOW_SECONDS: int = 900
+    # Clés API machine (n8n, scripts). N8N_SERVICE_API_KEY + liste optionnelle séparée par des virgules.
+    N8N_SERVICE_API_KEY: str = ""
+    SERVICE_API_KEYS: str = ""
+    # Création automatique du premier admin si la table users est vide
+    INITIAL_ADMIN_USERNAME: str = ""
+    INITIAL_ADMIN_PASSWORD: str = ""
+
+    @field_validator("JWT_SECRET_KEY")
+    @classmethod
+    def _secret_strength(cls, v: str) -> str:
+        if len(v) < 32 or v.startswith("change_me"):
+            raise ValueError("JWT_SECRET_KEY doit faire au moins 32 caractères aléatoires (openssl rand -hex 32)")
+        return v
+
+    @property
+    def service_api_keys(self) -> list[str]:
+        keys = [self.N8N_SERVICE_API_KEY] + self.SERVICE_API_KEYS.split(",")
+        return [k.strip() for k in keys if len(k.strip()) >= 32]
 
     LOG_LEVEL: str = "INFO"
     SERVICE_NAME: str = "editorial-core"

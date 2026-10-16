@@ -144,6 +144,10 @@ services:
       # Désactivé temporairement pour permettre l'accès via http://IP:18090/n8n/
       # À remettre à true (ou retirer) une fois HTTPS / Let's Encrypt en place.
       N8N_SECURE_COOKIE: "false"
+      # Clé API envoyée par les workflows (en-tête X-API-Key) vers editorial-core
+      TN_SERVICE_API_KEY: ${N8N_SERVICE_API_KEY}
+      # Autorise $env.TN_SERVICE_API_KEY dans les nœuds HTTP Request
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
     volumes:
       - n8n-data:/home/node/.n8n
       - ./n8n/workflows:/workflows:ro

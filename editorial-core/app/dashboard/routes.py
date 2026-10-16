@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
+from app.auth.deps import require_dashboard_admin
 from app.config import settings
 from app.db import get_session
 from app.models import ArticleGenerated, ClaudeLog, ExchangeRate, ExecutionLog, NotificationLog
@@ -184,7 +185,7 @@ def execution_detail(
 # Backfill historique BCT (UI)
 # ============================================================
 
-@router.get("/backfill", response_class=HTMLResponse)
+@router.get("/backfill", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_admin)])
 def backfill_form(request: Request, session: Session = Depends(get_session)):
     """Formulaire de backfill : date_from + date_to + bouton."""
     # Quelques stats actuelles pour informer l'utilisateur

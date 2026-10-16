@@ -39,9 +39,10 @@ docker compose exec editorial-core alembic upgrade head
 docker compose exec editorial-core python -m app.seed
 
 # 4. Vérifier (HOST_PORT par défaut = 18090, configurable dans .env)
-# Dashboard               : http://<host>:18090/dashboard/
-# Swagger editorial-core  : http://<host>:18090/api/docs
-# Swagger scraper-weather : http://<host>:18090/scraper/docs
+# (avant : make gen-secrets → .env, make migrate, make create-admin LOGIN=<vous> — voir SECURITY.md)
+# Dashboard               : http://<host>:18090/dashboard/   (login requis)
+# Swagger editorial-core  : http://<host>:18090/api/docs     (login requis)
+# Scrapers                : non exposés (réseau Docker interne uniquement)
 # n8n                     : http://<host>:18090/n8n/
 # Adminer                 : http://<host>:18090/adminer/
 ```
@@ -53,10 +54,10 @@ docker compose exec editorial-core python -m app.seed
 Sans attendre 6h00 :
 
 ```bash
-curl -X POST http://localhost/api/agents/weather/run
+curl -X POST -H "X-API-Key: $N8N_SERVICE_API_KEY" http://localhost:18090/api/agents/weather/run
 ```
 
-Ou via Swagger UI : http://localhost/api/docs → `POST /agents/weather/run` → "Try it out".
+Ou via Swagger UI (après connexion) : http://localhost:18090/api/docs → `POST /agents/weather/run` → "Try it out".
 
 ## Publication
 

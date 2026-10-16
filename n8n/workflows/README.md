@@ -17,6 +17,12 @@ docker compose exec n8n n8n import:workflow --input=/workflows/agent-meteo.json
 docker compose exec n8n n8n update:workflow --id=<workflow-id> --active=true
 ```
 
+## Authentification
+
+Chaque nœud *HTTP Request* envoie l'en-tête `X-API-Key: {{ $env.TN_SERVICE_API_KEY }}`.
+`TN_SERVICE_API_KEY` est alimentée par `N8N_SERVICE_API_KEY` du `.env` (voir `docker-compose.yml`).
+Après mise à jour, réimporter les workflows : `docker compose exec n8n n8n import:workflow --separate --input=/workflows/`.
+
 ## Workflows fournis
 
 | Fichier | Sprint | Déclenchement | Action |

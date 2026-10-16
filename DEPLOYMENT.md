@@ -53,9 +53,8 @@ Toutes les URLs passent par le port `HOST_PORT` (défaut **18090**). Remplacer `
 
 | URL | Attendu |
 | --- | --- |
-| http://&lt;host&gt;:18090/dashboard/ | Dashboard, table vide au début |
-| http://&lt;host&gt;:18090/api/docs | Swagger editorial-core |
-| http://&lt;host&gt;:18090/scraper/docs | Swagger scraper-weather |
+| http://&lt;host&gt;:18090/dashboard/ | Page de connexion puis dashboard (voir SECURITY.md pour créer le premier admin) |
+| http://&lt;host&gt;:18090/api/docs | Swagger editorial-core (connexion requise, bouton Authorize) |
 | http://&lt;host&gt;:18090/n8n/ | UI n8n (login admin / mdp .env) |
 | http://&lt;host&gt;:18090/adminer/ | Adminer (server: postgres) |
 
@@ -110,7 +109,7 @@ curl -X POST http://localhost:18090/api/agents/weather/run \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
-Ou via Swagger UI : http://&lt;host&gt;:18090/api/docs → `POST /api/agents/weather/run` → "Try it out".
+Ou via Swagger UI (après connexion) : http://&lt;host&gt;:18090/api/docs → `POST /api/agents/weather/run` → "Try it out". En ligne de commande, ajouter `-H "X-API-Key: $N8N_SERVICE_API_KEY"` ou un jeton Bearer (voir `SECURITY.md`).
 
 Le pipeline complet (collecte 24 gouvernorats → Claude → fichiers HTML → Telegram) prend ~30 à 90 secondes.
 
