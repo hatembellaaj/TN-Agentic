@@ -44,6 +44,15 @@ def _strip_json_fences(text: str) -> str:
     return text.strip()
 
 
+def _is_complete_json(text: str) -> bool:
+    """True si le texte reçu jusqu'ici est déjà un objet JSON complet."""
+    try:
+        json.loads(_strip_json_fences(text))
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
 def _estimate_cost_usd(model: str, in_tokens: int, out_tokens: int) -> Decimal:
     """Estimation des coûts par modèle (prix configurés en .env). Local = 0."""
     if settings.LLM_PROVIDER == "ollama":
@@ -136,14 +145,21 @@ class ClaudeClient:
         user_message: str,
         max_tokens: int,
     ) -> tuple[str, dict[str, int]]:
-        """Appel /api/chat d'Ollama, sortie JSON forcée."""
+        """
+        Appel /api/chat d'Ollama en streaming, sortie JSON forcée.
+
+        Le streaming permet de journaliser l'avancement, de ne couper que si
+        Ollama ne produit plus rien (OLLAMA_READ_TIMEOUT_SECONDS) ou dépasse la
+        durée totale (OLLAMA_TIMEOUT_SECONDS), et d'arrêter dès que l'objet
+        JSON est complet.
+        """
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            "stream": False,
+            "stream": True,
             "format": "json",
             "keep_alive": settings.OLLAMA_KEEP_ALIVE,
             "options": {
@@ -155,24 +171,91 @@ class ClaudeClient:
                 "temperature": settings.OLLAMA_TEMPERATURE,
             },
         }
-        resp = httpx.post(
-            f"{settings.OLLAMA_BASE_URL}/api/chat",
-            json=payload,
-            timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT_SECONDS, connect=10.0),
+        # read = silence max entre deux morceaux (chargement du modèle + lecture
+        # du prompt avant le premier token compris)
+        timeout = httpx.Timeout(
+            connect=10.0, read=settings.OLLAMA_READ_TIMEOUT_SECONDS, write=60.0, pool=10.0
         )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("done_reason") == "length":
+        started = time.monotonic()
+        deadline = started + settings.OLLAMA_TIMEOUT_SECONDS
+        first_token_at: float | None = None
+        last_progress = started
+        parts: list[str] = []
+        chunks = 0
+        json_done_at: int | None = None
+        final: dict[str, Any] = {}
+
+        with httpx.stream(
+            "POST", f"{settings.OLLAMA_BASE_URL}/api/chat", json=payload, timeout=timeout
+        ) as resp:
+            if resp.is_error:
+                resp.read()
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                data = json.loads(line)
+                if data.get("error"):
+                    raise RuntimeError(f"Ollama : {data['error']}")
+                piece = data.get("message", {}).get("content", "")
+                now = time.monotonic()
+                if piece:
+                    if first_token_at is None:
+                        first_token_at = now
+                        logger.info(
+                            "Ollama %s : prompt traité en %.0fs, génération en cours",
+                            self.model,
+                            now - started,
+                        )
+                    parts.append(piece)
+                    chunks += 1
+                if data.get("done"):
+                    final = data
+                    break
+                if now > deadline:
+                    raise TimeoutError(
+                        f"Génération Ollama > {settings.OLLAMA_TIMEOUT_SECONDS:.0f}s "
+                        f"({chunks} tokens produits)"
+                    )
+                if first_token_at is not None and now - last_progress >= 60:
+                    logger.info(
+                        "Ollama %s : %s tokens en %.0fs (%.1f tokens/s)",
+                        self.model,
+                        chunks,
+                        now - started,
+                        chunks / max(now - first_token_at, 1e-6),
+                    )
+                    last_progress = now
+                # Avec format=json certains modèles ajoutent des blancs sans fin
+                # après l'objet : une fois le JSON complet, on laisse 20 morceaux
+                # pour recevoir le "done" (et ses statistiques), puis on coupe.
+                if json_done_at is None:
+                    if "}" in piece and _is_complete_json("".join(parts)):
+                        json_done_at = chunks
+                elif chunks - json_done_at > 20:
+                    logger.warning(
+                        "Ollama %s : JSON complet mais génération continue, arrêt du flux",
+                        self.model,
+                    )
+                    break
+
+        if final.get("done_reason") == "length":
             logger.warning(
                 "Réponse Ollama tronquée (num_predict=%s ou num_ctx=%s atteint)",
                 max_tokens,
                 settings.OLLAMA_NUM_CTX,
             )
+        logger.info(
+            "Ollama %s : %s tokens générés en %.0fs",
+            self.model,
+            chunks,
+            time.monotonic() - started,
+        )
         return (
-            data.get("message", {}).get("content", ""),
+            "".join(parts),
             {
-                "input": data.get("prompt_eval_count", 0),
-                "output": data.get("eval_count", 0),
+                "input": final.get("prompt_eval_count", 0),
+                "output": final.get("eval_count", chunks),
                 "cache_read": 0,
                 "cache_creation": 0,
             },

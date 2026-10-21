@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     OLLAMA_NUM_THREAD: int = 6           # nombre de cœurs physiques
     OLLAMA_TEMPERATURE: float = 0.7
     OLLAMA_KEEP_ALIVE: str = "30m"
-    OLLAMA_TIMEOUT_SECONDS: float = 1800.0
+    OLLAMA_TIMEOUT_SECONDS: float = 3600.0   # récap dimanche : ~11k tokens en sortie
+    OLLAMA_READ_TIMEOUT_SECONDS: float = 600.0  # silence max d'Ollama (chargement + lecture du prompt)
 
     # Claude (utilisé si LLM_PROVIDER=anthropic)
     ANTHROPIC_API_KEY: str = ""

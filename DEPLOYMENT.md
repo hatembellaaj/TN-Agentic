@@ -303,7 +303,8 @@ conteneur `tn-ollama` (réseau interne, aucun port exposé, aucun appel externe)
 **Modèle retenu :** `qwen3:30b-a3b-instruct-2507-q4_K_M`. C'est un MoE de 30 Md de
 paramètres dont 3 Md actifs par token : il tourne à une vitesse utilisable sur CPU
 (serveur sans GPU). Il occupe environ 19 Go de disque et 22 Go de RAM avec un
-contexte de 32k tokens. Comptez de 3 à 10 minutes par article.
+contexte de 32k tokens. Comptez environ 8 tokens/s : ~10 min pour les taux de change,
+~15 min pour la météo, ~30 min pour le récap du dimanche.
 
 ### Mise en place
 
