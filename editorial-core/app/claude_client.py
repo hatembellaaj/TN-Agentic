@@ -1,5 +1,12 @@
 """
-Client Anthropic Claude avec prompt caching, retries, et logging des coûts.
+Client LLM avec retries et logging des coûts.
+
+Deux fournisseurs, choisis par LLM_PROVIDER :
+  - "anthropic" : API Claude avec prompt caching
+  - "ollama"    : LLM local (service docker `ollama`), sortie JSON forcée
+
+Le nom ClaudeClient et la table claude_logs sont conservés pour ne pas
+toucher aux agents ni au schéma de base.
 """
 from __future__ import annotations
 
@@ -10,6 +17,7 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
+import httpx
 from anthropic import Anthropic, APIError, APITimeoutError
 from sqlalchemy.orm import Session
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -37,7 +45,9 @@ def _strip_json_fences(text: str) -> str:
 
 
 def _estimate_cost_usd(model: str, in_tokens: int, out_tokens: int) -> Decimal:
-    """Estimation des coûts par modèle (prix configurés en .env)."""
+    """Estimation des coûts par modèle (prix configurés en .env). Local = 0."""
+    if settings.LLM_PROVIDER == "ollama":
+        return Decimal("0")
     if "opus" in model.lower():
         in_price = settings.CLAUDE_OPUS_INPUT_PRICE
         out_price = settings.CLAUDE_OPUS_OUTPUT_PRICE
@@ -49,11 +59,31 @@ def _estimate_cost_usd(model: str, in_tokens: int, out_tokens: int) -> Decimal:
 
 
 class ClaudeClient:
-    """Wrapper autour du SDK Anthropic."""
+    """Wrapper LLM : SDK Anthropic ou API Ollama selon LLM_PROVIDER."""
 
     def __init__(self, model: str | None = None):
-        self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        self.model = model or settings.CLAUDE_MODEL_DEFAULT
+        self.provider = settings.LLM_PROVIDER
+        if self.provider == "ollama":
+            # Un override "claude-*" (ex. workflow n8n du dimanche) n'a pas de sens
+            # en local : on retombe sur le modèle Ollama configuré.
+            if model and model.startswith("claude-"):
+                model = None
+            self.model = model or settings.OLLAMA_MODEL
+            self.client = None
+        else:
+            self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self.model = model or settings.CLAUDE_MODEL_DEFAULT
+
+    def _call_api(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int = 8000,
+    ) -> tuple[str, dict[str, int]]:
+        """Renvoie (texte brut, usage) quel que soit le fournisseur."""
+        if self.provider == "ollama":
+            return self._call_ollama(system_prompt, user_message, max_tokens)
+        return self._call_anthropic(system_prompt, user_message, max_tokens)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -61,14 +91,14 @@ class ClaudeClient:
         retry=retry_if_exception_type((APIError, APITimeoutError)),
         reraise=True,
     )
-    def _call_api(
+    def _call_anthropic(
         self,
         system_prompt: str,
         user_message: str,
-        max_tokens: int = 8000,
-    ) -> Any:
+        max_tokens: int,
+    ) -> tuple[str, dict[str, int]]:
         """Appel bas niveau avec prompt caching sur le system prompt."""
-        return self.client.messages.create(
+        resp = self.client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
             system=[
@@ -79,6 +109,73 @@ class ClaudeClient:
                 }
             ],
             messages=[{"role": "user", "content": user_message}],
+        )
+        usage = resp.usage
+        return (
+            resp.content[0].text if resp.content else "",
+            {
+                "input": getattr(usage, "input_tokens", 0),
+                "output": getattr(usage, "output_tokens", 0),
+                "cache_read": getattr(usage, "cache_read_input_tokens", 0),
+                "cache_creation": getattr(usage, "cache_creation_input_tokens", 0),
+            },
+        )
+
+    # Pas de retry sur timeout : une génération CPU qui expire ne réussira pas
+    # mieux en recommençant. On retente seulement si Ollama est injoignable
+    # (redémarrage du conteneur) ou renvoie une erreur HTTP.
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=5, max=60),
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.HTTPStatusError)),
+        reraise=True,
+    )
+    def _call_ollama(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int,
+    ) -> tuple[str, dict[str, int]]:
+        """Appel /api/chat d'Ollama, sortie JSON forcée."""
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "stream": False,
+            "format": "json",
+            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
+            "options": {
+                # Le contexte doit contenir prompt + réponse, sinon le glossaire
+                # est tronqué silencieusement.
+                "num_ctx": settings.OLLAMA_NUM_CTX,
+                "num_predict": max_tokens,
+                "num_thread": settings.OLLAMA_NUM_THREAD,
+                "temperature": settings.OLLAMA_TEMPERATURE,
+            },
+        }
+        resp = httpx.post(
+            f"{settings.OLLAMA_BASE_URL}/api/chat",
+            json=payload,
+            timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT_SECONDS, connect=10.0),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("done_reason") == "length":
+            logger.warning(
+                "Réponse Ollama tronquée (num_predict=%s ou num_ctx=%s atteint)",
+                max_tokens,
+                settings.OLLAMA_NUM_CTX,
+            )
+        return (
+            data.get("message", {}).get("content", ""),
+            {
+                "input": data.get("prompt_eval_count", 0),
+                "output": data.get("eval_count", 0),
+                "cache_read": 0,
+                "cache_creation": 0,
+            },
         )
 
     def generate_article(
@@ -104,18 +201,16 @@ class ClaudeClient:
         while attempts <= max_json_retries:
             attempts += 1
             try:
-                resp = self._call_api(system_prompt, current_user_message, max_tokens)
-                raw_text = resp.content[0].text if resp.content else ""
+                raw_text, usage = self._call_api(system_prompt, current_user_message, max_tokens)
                 cleaned = _strip_json_fences(raw_text)
                 parsed = json.loads(cleaned)
 
                 # Log succès
                 duree_ms = int((time.perf_counter() - started_at) * 1000)
-                usage = resp.usage
-                tokens_input = getattr(usage, "input_tokens", 0)
-                tokens_output = getattr(usage, "output_tokens", 0)
-                tokens_cache_read = getattr(usage, "cache_read_input_tokens", 0)
-                tokens_cache_creation = getattr(usage, "cache_creation_input_tokens", 0)
+                tokens_input = usage["input"]
+                tokens_output = usage["output"]
+                tokens_cache_read = usage["cache_read"]
+                tokens_cache_creation = usage["cache_creation"]
                 cout = _estimate_cost_usd(self.model, tokens_input, tokens_output)
 
                 session.add(

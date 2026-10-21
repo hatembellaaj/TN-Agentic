@@ -115,6 +115,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ollama:
+        condition: service_started
     networks:
       - tn-net
     healthcheck:
@@ -122,6 +124,36 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # ----------------------------------------------------------
+  # ollama : LLM local (utilisé si LLM_PROVIDER=ollama)
+  # Réseau interne uniquement, aucun port exposé sur l'hôte.
+  # ----------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: tn-ollama
+    restart: unless-stopped
+    environment:
+      # Un seul modèle chargé, une seule génération à la fois : les agents
+      # tournent à des heures différentes et la RAM est partagée avec d'autres stacks.
+      OLLAMA_MAX_LOADED_MODELS: 1
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      TZ: Africa/Tunis
+    volumes:
+      - ollama-models:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          # Garde-fou pour les autres projets du serveur (modèle ~19 Go + contexte)
+          memory: ${OLLAMA_MEMORY_LIMIT:-28g}
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - tn-net
 
   # ----------------------------------------------------------
   # n8n : orchestrateur de workflows
@@ -196,6 +228,10 @@ services:
 volumes:
   postgres-data:
   n8n-data:
+  ollama-models:
+    # Nom configurable pour réutiliser un volume existant contenant déjà les
+    # modèles (ex. OLLAMA_VOLUME_NAME=ollama-test) au lieu de les retélécharger.
+    name: ${OLLAMA_VOLUME_NAME:-tn-ollama-models}
 
 networks:
   tn-net:

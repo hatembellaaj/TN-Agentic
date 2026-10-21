@@ -11,8 +11,20 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
-    # Claude
-    ANTHROPIC_API_KEY: str
+    # Fournisseur LLM : "ollama" (local) ou "anthropic" (API Claude)
+    LLM_PROVIDER: Literal["ollama", "anthropic"] = "anthropic"
+
+    # Ollama (utilisé si LLM_PROVIDER=ollama)
+    OLLAMA_BASE_URL: str = "http://ollama:11434"
+    OLLAMA_MODEL: str = "qwen3:30b-a3b-instruct-2507-q4_K_M"
+    OLLAMA_NUM_CTX: int = 32768          # prompt + réponse (récap dimanche : jusqu'à 12k en sortie)
+    OLLAMA_NUM_THREAD: int = 6           # nombre de cœurs physiques
+    OLLAMA_TEMPERATURE: float = 0.7
+    OLLAMA_KEEP_ALIVE: str = "30m"
+    OLLAMA_TIMEOUT_SECONDS: float = 1800.0
+
+    # Claude (utilisé si LLM_PROVIDER=anthropic)
+    ANTHROPIC_API_KEY: str = ""
     CLAUDE_MODEL_DEFAULT: str = "claude-sonnet-4-5-20250929"
     CLAUDE_MODEL_PREMIUM: str = "claude-opus-4-5"
     CLAUDE_SONNET_INPUT_PRICE: float = 3.0

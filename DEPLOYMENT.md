@@ -6,7 +6,7 @@ Ce document décrit la mise en route locale **et** le déploiement sur le VPS OV
 
 - Docker 24+ et Docker Compose v2 (`docker compose version`)
 - Une clé OpenWeatherMap (gratuite jusqu'à 1000 req/jour) : https://openweathermap.org/api
-- Une clé Anthropic Claude : https://console.anthropic.com/
+- Un LLM : soit local via Ollama (voir §13, ~25 Go de RAM et ~20 Go de disque), soit une clé Anthropic Claude : https://console.anthropic.com/
 - Un bot Telegram créé via @BotFather, et le `chat_id` du journaliste validateur
 - Au moins 2 Go de RAM libre
 
@@ -20,7 +20,7 @@ cp .env.example .env
 
 - `POSTGRES_PASSWORD` (générer un mot de passe robuste)
 - `OPENWEATHERMAP_API_KEY`
-- `ANTHROPIC_API_KEY`
+- `LLM_PROVIDER` (`ollama` ou `anthropic`) et, si `anthropic`, `ANTHROPIC_API_KEY`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID` (déjà rempli avec 29991777, le numéro du cahier des charges)
 - `N8N_BASIC_AUTH_PASSWORD`
@@ -294,3 +294,52 @@ docker compose down -v
 | 401 OpenWeatherMap | Clé API invalide ou en attente d'activation | Une nouvelle clé OWM met ~10 min à s'activer |
 | 400 Telegram MarkdownV2 | Caractères mal échappés | Vérifier les logs `editorial-core` |
 | Halluc. "suspected" sur tous les articles | Le pool autorisé est trop strict | Ajuster `TEMPERATURE_TOLERANCE` dans `app/hallucination_check.py` |
+
+## 13. LLM local (Ollama)
+
+Avec `LLM_PROVIDER=ollama`, les articles sont générés par un modèle local dans le
+conteneur `tn-ollama` (réseau interne, aucun port exposé, aucun appel externe).
+
+**Modèle retenu :** `qwen3:30b-a3b-instruct-2507-q4_K_M`. C'est un MoE de 30 Md de
+paramètres dont 3 Md actifs par token : il tourne à une vitesse utilisable sur CPU
+(serveur sans GPU). Il occupe environ 19 Go de disque et 22 Go de RAM avec un
+contexte de 32k tokens. Comptez de 3 à 10 minutes par article.
+
+### Mise en place
+
+1. Dans `.env` :
+
+   ```
+   LLM_PROVIDER=ollama
+   OLLAMA_MODEL=qwen3:30b-a3b-instruct-2507-q4_K_M
+   OLLAMA_NUM_THREAD=6          # cœurs physiques du serveur
+   OLLAMA_VOLUME_NAME=ollama-test   # volume existant qui contient déjà le modèle
+   ```
+
+   Sans volume existant, gardez `tn-ollama-models` : le volume sera créé vide.
+
+2. Démarrage, téléchargement du modèle (s'il n'est pas déjà dans le volume) et test :
+
+   ```bash
+   sudo docker compose up -d --build ollama editorial-core
+   sudo make ollama-pull
+   sudo make ollama-test        # regarder « eval rate » : > 10 tokens/s attendu
+   sudo make run-weather        # génération réelle d'un article
+   ```
+
+3. **n8n** : les délais d'attente des workflows passent à 30 min (45 min pour le
+   dimanche). Réimportez les workflows de `n8n/workflows/` dans l'interface n8n
+   pour que ces nouvelles valeurs soient prises en compte.
+
+### Points d'attention
+
+- `num_ctx` (`OLLAMA_NUM_CTX`) doit couvrir le prompt **et** la réponse. Une valeur
+  trop basse tronque le glossaire BCT sans message d'erreur.
+- La sortie est forcée en JSON (`format: json`) : moins de réponses mal formées
+  qu'avec un simple rappel dans le prompt.
+- Le coût est enregistré à 0 dans `claude_logs`. Les tokens et la durée restent journalisés.
+- Un `model_override` de type `claude-*` (workflow dimanche) est ignoré en local :
+  le modèle `OLLAMA_MODEL` est utilisé.
+- ⚠️ `make reset` / `docker compose down -v` supprime aussi le volume des modèles
+  (y compris `ollama-test` s'il est référencé). Il faudra ensuite relancer `make ollama-pull`.
+- Retour à Claude : `LLM_PROVIDER=anthropic`, puis `sudo docker compose up -d editorial-core`.

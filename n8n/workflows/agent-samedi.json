@@ -23,7 +23,7 @@
         "method": "POST",
         "url": "http://editorial-core:8000/api/agents/saturday/run",
         "options": {
-          "timeout": 300000,
+          "timeout": 1800000,
           "response": {
             "response": {
               "fullResponse": false,

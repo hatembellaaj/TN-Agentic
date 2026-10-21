@@ -4,7 +4,7 @@
 # ============================================================
 
 .PHONY: help build up down restart logs ps init run-weather shell-core shell-scraper db-shell \
-        create-admin create-editor users gen-secrets \
+        create-admin create-editor users gen-secrets ollama-pull ollama-test \
         migrate seed reset clean lint test status
 
 help: ## Affiche cette aide
@@ -98,6 +98,16 @@ collect-all-bct: ## Collecte index.jsp + indicateurs.jsp en un seul appel (en ba
 	@PORT=$$(grep '^HOST_PORT=' .env | cut -d= -f2); \
 	PORT=$${PORT:-18090}; \
 	docker compose exec -T editorial-core curl -s -X POST http://scraper-bct:8002/collect-all | python3 -m json.tool
+
+# ----------------------------------------------------------
+# LLM local (Ollama)
+# ----------------------------------------------------------
+ollama-pull: ## Télécharge le modèle OLLAMA_MODEL du .env dans le conteneur ollama
+	docker compose exec ollama ollama pull $$(grep '^OLLAMA_MODEL=' .env | cut -d= -f2-)
+
+ollama-test: ## Génère un court texte et affiche la vitesse (eval rate)
+	docker compose exec ollama ollama run $$(grep '^OLLAMA_MODEL=' .env | cut -d= -f2-) --verbose \
+	  "Rédige 150 mots en français sur l'évolution du dinar tunisien face à l'euro."
 
 # ----------------------------------------------------------
 # Accès / debug
