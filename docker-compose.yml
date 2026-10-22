@@ -115,7 +115,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
+      llama-server:
         condition: service_started
     networks:
       - tn-net
@@ -126,32 +126,47 @@ services:
       retries: 3
 
   # ----------------------------------------------------------
-  # ollama : LLM local (utilisé si LLM_PROVIDER=ollama)
-  # Réseau interne uniquement, aucun port exposé sur l'hôte.
+  # llama-server : LLM local llama.cpp (utilisé si LLM_PROVIDER=local)
+  # API compatible OpenAI, réseau interne uniquement, aucun port exposé.
+  # Préféré à Ollama : lecture du prompt ~4x plus rapide sur CPU pour les
+  # modèles MoE (Qwen3-30B-A3B : ~30 tokens/s en lecture, ~11 en écriture).
   # ----------------------------------------------------------
-  ollama:
-    image: ollama/ollama:latest
-    container_name: tn-ollama
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: tn-llama-server
     restart: unless-stopped
+    command:
+      - --model
+      - /models/${LLAMA_MODEL_FILE:-qwen3-30b-a3b-instruct-2507-q4_k_m.gguf}
+      - --alias
+      - ${LOCAL_LLM_MODEL:-qwen3-30b-a3b-instruct-2507}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      # Contexte total (prompt + réponse) : récap dimanche jusqu'à 12k en sortie
+      - --ctx-size
+      - ${LLAMA_CTX_SIZE:-32768}
+      # Cœurs physiques du serveur
+      - --threads
+      - ${LLAMA_THREADS:-6}
+      # Une génération à la fois (les agents tournent à des heures différentes)
+      - --parallel
+      - "1"
+      # Gabarit de chat embarqué dans le GGUF
+      - --jinja
+      # Pas de coupure côté serveur pendant les longues générations
+      - --timeout
+      - "3600"
     environment:
-      # Un seul modèle chargé, une seule génération à la fois : les agents
-      # tournent à des heures différentes et la RAM est partagée avec d'autres stacks.
-      OLLAMA_MAX_LOADED_MODELS: 1
-      OLLAMA_NUM_PARALLEL: 1
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
       TZ: Africa/Tunis
     volumes:
-      - ollama-models:/root/.ollama
+      - llm-models:/models:ro
     deploy:
       resources:
         limits:
-          # Garde-fou pour les autres projets du serveur (modèle ~19 Go + contexte)
-          memory: ${OLLAMA_MEMORY_LIMIT:-28g}
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+          # Garde-fou pour les autres projets du serveur (modèle ~17 Go + contexte ~3 Go)
+          memory: ${LLAMA_MEMORY_LIMIT:-28g}
     networks:
       - tn-net
 
@@ -228,10 +243,11 @@ services:
 volumes:
   postgres-data:
   n8n-data:
-  ollama-models:
-    # Nom configurable pour réutiliser un volume existant contenant déjà les
-    # modèles (ex. OLLAMA_VOLUME_NAME=ollama-test) au lieu de les retélécharger.
-    name: ${OLLAMA_VOLUME_NAME:-tn-ollama-models}
+  llm-models:
+    # Volume contenant le fichier GGUF du modèle. Nom configurable pour
+    # réutiliser un volume existant (ex. LLM_VOLUME_NAME=ollama-test, avec
+    # LLAMA_MODEL_FILE=models/blobs/sha256-...) au lieu de retélécharger.
+    name: ${LLM_VOLUME_NAME:-tn-llm-models}
 
 networks:
   tn-net:

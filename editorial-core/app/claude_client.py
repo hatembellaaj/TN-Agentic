@@ -3,7 +3,8 @@ Client LLM avec retries et logging des coûts.
 
 Deux fournisseurs, choisis par LLM_PROVIDER :
   - "anthropic" : API Claude avec prompt caching
-  - "ollama"    : LLM local (service docker `ollama`), sortie JSON forcée
+  - "local"     : LLM local llama.cpp (service docker `llama-server`, API
+                  compatible OpenAI), sortie JSON forcée
 
 Le nom ClaudeClient et la table claude_logs sont conservés pour ne pas
 toucher aux agents ni au schéma de base.
@@ -55,7 +56,7 @@ def _is_complete_json(text: str) -> bool:
 
 def _estimate_cost_usd(model: str, in_tokens: int, out_tokens: int) -> Decimal:
     """Estimation des coûts par modèle (prix configurés en .env). Local = 0."""
-    if settings.LLM_PROVIDER == "ollama":
+    if settings.LLM_PROVIDER == "local":
         return Decimal("0")
     if "opus" in model.lower():
         in_price = settings.CLAUDE_OPUS_INPUT_PRICE
@@ -68,16 +69,14 @@ def _estimate_cost_usd(model: str, in_tokens: int, out_tokens: int) -> Decimal:
 
 
 class ClaudeClient:
-    """Wrapper LLM : SDK Anthropic ou API Ollama selon LLM_PROVIDER."""
+    """Wrapper LLM : SDK Anthropic ou llama.cpp local selon LLM_PROVIDER."""
 
     def __init__(self, model: str | None = None):
         self.provider = settings.LLM_PROVIDER
-        if self.provider == "ollama":
-            # Un override "claude-*" (ex. workflow n8n du dimanche) n'a pas de sens
-            # en local : on retombe sur le modèle Ollama configuré.
-            if model and model.startswith("claude-"):
-                model = None
-            self.model = model or settings.OLLAMA_MODEL
+        if self.provider == "local":
+            # llama-server ne sert qu'un modèle : tout override (ex. "claude-opus-4-5"
+            # du workflow n8n du dimanche) est ignoré.
+            self.model = settings.LOCAL_LLM_MODEL
             self.client = None
         else:
             self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -90,8 +89,8 @@ class ClaudeClient:
         max_tokens: int = 8000,
     ) -> tuple[str, dict[str, int]]:
         """Renvoie (texte brut, usage) quel que soit le fournisseur."""
-        if self.provider == "ollama":
-            return self._call_ollama(system_prompt, user_message, max_tokens)
+        if self.provider == "local":
+            return self._call_local(system_prompt, user_message, max_tokens)
         return self._call_anthropic(system_prompt, user_message, max_tokens)
 
     @retry(
@@ -131,27 +130,27 @@ class ClaudeClient:
         )
 
     # Pas de retry sur timeout : une génération CPU qui expire ne réussira pas
-    # mieux en recommençant. On retente seulement si Ollama est injoignable
-    # (redémarrage du conteneur) ou renvoie une erreur HTTP.
+    # mieux en recommençant. On retente seulement si llama-server est injoignable
+    # (redémarrage, chargement du modèle) ou renvoie une erreur HTTP.
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=5, max=60),
         retry=retry_if_exception_type((httpx.ConnectError, httpx.HTTPStatusError)),
         reraise=True,
     )
-    def _call_ollama(
+    def _call_local(
         self,
         system_prompt: str,
         user_message: str,
         max_tokens: int,
     ) -> tuple[str, dict[str, int]]:
         """
-        Appel /api/chat d'Ollama en streaming, sortie JSON forcée.
+        Appel /v1/chat/completions de llama-server en streaming, sortie JSON forcée.
 
-        Le streaming permet de journaliser l'avancement, de ne couper que si
-        Ollama ne produit plus rien (OLLAMA_READ_TIMEOUT_SECONDS) ou dépasse la
-        durée totale (OLLAMA_TIMEOUT_SECONDS), et d'arrêter dès que l'objet
-        JSON est complet.
+        Le streaming permet de journaliser l'avancement, de ne couper que si le
+        serveur ne produit plus rien (LOCAL_LLM_READ_TIMEOUT_SECONDS) ou dépasse
+        la durée totale (LOCAL_LLM_TIMEOUT_SECONDS), et d'arrêter si le modèle
+        continue après un objet JSON complet.
         """
         payload = {
             "model": self.model,
@@ -160,93 +159,92 @@ class ClaudeClient:
                 {"role": "user", "content": user_message},
             ],
             "stream": True,
-            "format": "json",
-            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
-            "options": {
-                # Le contexte doit contenir prompt + réponse, sinon le glossaire
-                # est tronqué silencieusement.
-                "num_ctx": settings.OLLAMA_NUM_CTX,
-                "num_predict": max_tokens,
-                "num_thread": settings.OLLAMA_NUM_THREAD,
-                "temperature": settings.OLLAMA_TEMPERATURE,
-            },
+            "stream_options": {"include_usage": True},
+            "response_format": {"type": "json_object"},
+            "max_tokens": max_tokens,
+            "temperature": settings.LOCAL_LLM_TEMPERATURE,
         }
-        # read = silence max entre deux morceaux (chargement du modèle + lecture
-        # du prompt avant le premier token compris)
+        # read = silence max entre deux morceaux (lecture du prompt avant le
+        # premier token comprise)
         timeout = httpx.Timeout(
-            connect=10.0, read=settings.OLLAMA_READ_TIMEOUT_SECONDS, write=60.0, pool=10.0
+            connect=10.0, read=settings.LOCAL_LLM_READ_TIMEOUT_SECONDS, write=60.0, pool=10.0
         )
         started = time.monotonic()
-        deadline = started + settings.OLLAMA_TIMEOUT_SECONDS
+        deadline = started + settings.LOCAL_LLM_TIMEOUT_SECONDS
         first_token_at: float | None = None
         last_progress = started
         parts: list[str] = []
         chunks = 0
         json_done_at: int | None = None
-        final: dict[str, Any] = {}
+        finish_reason: str | None = None
+        usage: dict[str, Any] = {}
 
         with httpx.stream(
-            "POST", f"{settings.OLLAMA_BASE_URL}/api/chat", json=payload, timeout=timeout
+            "POST",
+            f"{settings.LOCAL_LLM_BASE_URL}/v1/chat/completions",
+            json=payload,
+            timeout=timeout,
         ) as resp:
             if resp.is_error:
                 resp.read()
             resp.raise_for_status()
             for line in resp.iter_lines():
-                if not line:
+                if not line.startswith("data:"):
                     continue
-                data = json.loads(line)
+                data_str = line[5:].strip()
+                if data_str == "[DONE]":
+                    break
+                data = json.loads(data_str)
                 if data.get("error"):
-                    raise RuntimeError(f"Ollama : {data['error']}")
-                piece = data.get("message", {}).get("content", "")
+                    raise RuntimeError(f"llama-server : {data['error']}")
+                if data.get("usage"):
+                    usage = data["usage"]
+                choice = (data.get("choices") or [{}])[0]
+                piece = (choice.get("delta") or {}).get("content") or ""
+                finish_reason = choice.get("finish_reason") or finish_reason
                 now = time.monotonic()
                 if piece:
                     if first_token_at is None:
                         first_token_at = now
                         logger.info(
-                            "Ollama %s : prompt traité en %.0fs, génération en cours",
+                            "LLM local %s : prompt traité en %.0fs, génération en cours",
                             self.model,
                             now - started,
                         )
                     parts.append(piece)
                     chunks += 1
-                if data.get("done"):
-                    final = data
-                    break
                 if now > deadline:
                     raise TimeoutError(
-                        f"Génération Ollama > {settings.OLLAMA_TIMEOUT_SECONDS:.0f}s "
+                        f"Génération locale > {settings.LOCAL_LLM_TIMEOUT_SECONDS:.0f}s "
                         f"({chunks} tokens produits)"
                     )
                 if first_token_at is not None and now - last_progress >= 60:
                     logger.info(
-                        "Ollama %s : %s tokens en %.0fs (%.1f tokens/s)",
+                        "LLM local %s : %s tokens en %.0fs (%.1f tokens/s)",
                         self.model,
                         chunks,
                         now - started,
                         chunks / max(now - first_token_at, 1e-6),
                     )
                     last_progress = now
-                # Avec format=json certains modèles ajoutent des blancs sans fin
-                # après l'objet : une fois le JSON complet, on laisse 20 morceaux
-                # pour recevoir le "done" (et ses statistiques), puis on coupe.
+                # Si le modèle continue après un JSON complet (blancs sans fin),
+                # on laisse 20 morceaux pour recevoir la fin du flux, puis on coupe.
                 if json_done_at is None:
                     if "}" in piece and _is_complete_json("".join(parts)):
                         json_done_at = chunks
                 elif chunks - json_done_at > 20:
                     logger.warning(
-                        "Ollama %s : JSON complet mais génération continue, arrêt du flux",
+                        "LLM local %s : JSON complet mais génération continue, arrêt du flux",
                         self.model,
                     )
                     break
 
-        if final.get("done_reason") == "length":
+        if finish_reason == "length":
             logger.warning(
-                "Réponse Ollama tronquée (num_predict=%s ou num_ctx=%s atteint)",
-                max_tokens,
-                settings.OLLAMA_NUM_CTX,
+                "Réponse locale tronquée (max_tokens=%s ou contexte atteint)", max_tokens
             )
         logger.info(
-            "Ollama %s : %s tokens générés en %.0fs",
+            "LLM local %s : %s tokens générés en %.0fs",
             self.model,
             chunks,
             time.monotonic() - started,
@@ -254,8 +252,8 @@ class ClaudeClient:
         return (
             "".join(parts),
             {
-                "input": final.get("prompt_eval_count", 0),
-                "output": final.get("eval_count", chunks),
+                "input": usage.get("prompt_tokens", 0),
+                "output": usage.get("completion_tokens", chunks),
                 "cache_read": 0,
                 "cache_creation": 0,
             },

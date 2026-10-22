@@ -4,7 +4,7 @@
 # ============================================================
 
 .PHONY: help build up down restart logs ps init run-weather shell-core shell-scraper db-shell \
-        create-admin create-editor users gen-secrets ollama-pull ollama-test \
+        create-admin create-editor users gen-secrets llm-test llm-logs \
         migrate seed reset clean lint test status
 
 help: ## Affiche cette aide
@@ -100,14 +100,13 @@ collect-all-bct: ## Collecte index.jsp + indicateurs.jsp en un seul appel (en ba
 	docker compose exec -T editorial-core curl -s -X POST http://scraper-bct:8002/collect-all | python3 -m json.tool
 
 # ----------------------------------------------------------
-# LLM local (Ollama)
+# LLM local (llama-server)
 # ----------------------------------------------------------
-ollama-pull: ## Télécharge le modèle OLLAMA_MODEL du .env dans le conteneur ollama
-	docker compose exec ollama ollama pull $$(grep '^OLLAMA_MODEL=' .env | cut -d= -f2-)
+llm-test: ## Mesure la vitesse du LLM local sur un prompt de taille réelle (~3 min)
+	docker compose exec -T editorial-core python -m app.llm_bench
 
-ollama-test: ## Génère un court texte et affiche la vitesse (eval rate)
-	docker compose exec ollama ollama run $$(grep '^OLLAMA_MODEL=' .env | cut -d= -f2-) --verbose \
-	  "Rédige 150 mots en français sur l'évolution du dinar tunisien face à l'euro."
+llm-logs: ## Suit l'avancement des générations locales
+	docker compose logs -f --tail=50 editorial-core | grep --line-buffered "LLM local"
 
 # ----------------------------------------------------------
 # Accès / debug
